@@ -41,6 +41,26 @@ else
     --url "https://${ISSUER}" --client-id-list sts.amazonaws.com >/dev/null
 fi
 
+# The `sub` claim's exact format is NOT always `repo:owner/name:ref:...`. Some GitHub deployments embed
+# numeric ids — `repo:owner@<owner_id>/name@<repo_id>:ref:...` — and a mismatch fails with the
+# unhelpful "Not authorized to perform sts:AssumeRoleWithWebIdentity", which reads like a permissions
+# problem rather than a string mismatch. So ASK GitHub for the ids and build the subject from them; if
+# `gh` isn't available, fall back to the plain form.
+#
+# To see what a token actually carries, add this to a workflow job with `id-token: write`:
+#   - run: |
+#       curl -sH "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+#         "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" \
+#         | python3 -c 'import json,sys,base64; t=json.load(sys.stdin)["value"].split(".")[1]; print(base64.urlsafe_b64decode(t+"=="))'
+IDS="$(gh api "repos/${REPO}" --jq '"\(.owner.login)@\(.owner.id)/\(.name)@\(.id)"' 2>/dev/null || true)"
+if [ -n "$IDS" ]; then
+  SUBJECT="repo:${IDS}:ref:refs/heads/main"
+  echo "▸ subject (from the GitHub API): ${SUBJECT}"
+else
+  SUBJECT="repo:${REPO}:ref:refs/heads/main"
+  echo "▸ subject (gh unavailable, using the plain form): ${SUBJECT}"
+fi
+
 # Trust ONLY pushes to this repo's main branch.
 #
 # StringEquals on the full `sub`, never StringLike with a wildcard: a wildcard in the repo position
@@ -57,7 +77,7 @@ TRUST=$(cat <<JSON
     "Condition": {
       "StringEquals": {
         "${ISSUER}:aud": "sts.amazonaws.com",
-        "${ISSUER}:sub": "repo:${REPO}:ref:refs/heads/main"
+        "${ISSUER}:sub": "${SUBJECT}"
       }
     }
   }]
