@@ -86,6 +86,10 @@ Copy the existing lockfile across, not just `package.json` — regenerating from
 re-floats every transitive `^` range and widens the diff beyond the package you changed. Then run root
 `npm install` as well, and commit both lockfiles.
 
+**`npm run check` cannot see lockfile drift** — only `npm ci` can, and that's what CI runs first. If you
+rename a workspace package, or change any `package.json` name/version, run `npm ci` from a clean tree
+before pushing. A rename once passed every local check and failed CI in 15 seconds.
+
 ## The three loops
 
 Shortest first — use the shortest one that can catch the class of bug you're chasing.
