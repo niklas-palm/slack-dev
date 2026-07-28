@@ -374,8 +374,13 @@ Auth is **keyless** — GitHub OIDC exchanged for a short-lived role, so there a
 repo or in GitHub secrets. One-time setup:
 
 ```bash
-env -u AWS_PROFILE npm run deploy:ci     # creates the OIDC provider + the deploy role, prints its ARN
+env -u AWS_PROFILE npm run setup:oidc    # creates/reuses the OIDC provider + the deploy role
 ```
+
+It's a script, not a stack, on purpose: you need it only if THIS clone deploys itself from Actions. An
+agent you stood up for another repository deploys from a laptop and wants none of it. The script is
+idempotent and reuses an account's existing GitHub OIDC provider — there can be only one per issuer, so
+an account that already uses GitHub Actions anywhere has one.
 
 Then in the repo: **Settings → Secrets and variables → Actions → Variables → New variable**, named
 `AWS_DEPLOY_ROLE_ARN`, set to the printed ARN. It's a *variable*, not a secret — a role ARN isn't
@@ -390,13 +395,11 @@ deploy even if the workflow tried.
 
 Two things worth knowing:
 
-- The CI stack is deployed **by hand**, and `npm run deploy` deliberately excludes it — it's the
-  identity that performs deploys, so a deploy must not be able to widen its own permissions.
+- The role is created **by hand** and is not part of `npm run deploy` — it's the identity that performs
+  deploys, so a deploy must not be able to widen its own permissions.
 - The role can publish the image ARN but **cannot read any agent's secrets** (no `ssm:GetParameter`, no
   `kms:Decrypt`). A compromised workflow can redeploy the agent; it can't exfiltrate a Slack token or a
   GitHub private key. Pinned by tests in `infra/test/ci-stack.test.ts`.
-- If the account already uses GitHub OIDC, pass the existing provider so the deploy doesn't fail with
-  `EntityAlreadyExists`: `GITHUB_OIDC_PROVIDER_ARN=arn:… npm run deploy:ci`.
 
 ## Adding a second agent
 

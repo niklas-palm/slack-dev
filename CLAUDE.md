@@ -70,7 +70,7 @@ npm run check      # typecheck + tests, offline (~30s)   ← before every commit
 npm run docker     # build + run the REAL microVM image locally, probe every hook
 npm run image      # register the image in AWS           ← ships runtime/, incl. PROMPT.md
 npm run deploy     # the routing around it: table, roles, webhook
-npm run deploy:ci  # ONE-TIME, BY HAND: the GitHub OIDC deploy role (never part of `deploy`)
+npm run setup:oidc # ONE-TIME, BY HAND: the GitHub OIDC deploy role for THIS repo only
 npm run invoke     # one turn against a deployed VM
 npm run synth      # CDK template, no deploy
 npm run secrets    # store/rotate any secret in SSM
@@ -85,8 +85,10 @@ than a profile.
 
 **CI is keyless.** `.github/workflows/deploy.yml` assumes an IAM role via GitHub OIDC — no AWS keys
 anywhere. The role trusts only this repo's `main`, and it can publish the image ARN but **cannot read
-any agent's secrets**; don't widen either without saying so. `infra/lib/ci-stack.ts`, deployed by hand
-because it's the identity that performs deploys.
+any agent's secrets**; don't widen either without saying so. Created by
+`scripts/setup-github-oidc.sh`, imperatively and by hand: it's the identity that performs deploys, so a
+deploy must not be able to widen its own permissions — and it's core-only, not something a spoke agent
+should carry.
 
 `.github/` belongs to THIS repo only. A clone made to run an agent for a different project deletes it —
 it would otherwise be a workflow in someone else's repository deploying into this account. The

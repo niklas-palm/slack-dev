@@ -16,7 +16,7 @@
     "synth": "npm run synth -w infra",
     "image": "npm run image -w infra",
     "deploy": "npm run deploy -w infra",
-    "deploy:ci": "npm run deploy:ci -w infra",
+    "setup:oidc": "bash scripts/setup-github-oidc.sh",
     "destroy": "npm run destroy -w infra",
     "secrets": "bash scripts/put-secrets.sh",
     "invoke": "npm run invoke -w infra",

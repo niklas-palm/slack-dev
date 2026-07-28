@@ -5,13 +5,14 @@
 # a secret). The role and its trust policy live in `infra/lib/ci-stack.ts`.
 #
 # ONE-TIME SETUP, in this order:
-#   1. env -u AWS_PROFILE npm run deploy:ci        # creates the OIDC provider + the deploy role
+#   1. env -u AWS_PROFILE npm run setup:oidc       # creates/reuses the provider + the deploy role
 #   2. copy the printed ARN into the repo: Settings → Secrets and variables → Actions → Variables →
 #      New variable, name AWS_DEPLOY_ROLE_ARN
 #   3. protect `main` — with this workflow, push access to main is deploy access.
 #
-# The CI stack is deployed by hand on purpose and is NOT in `npm run deploy`: it's the identity that
-# performs deploys, so a deploy must never be able to widen its own permissions.
+# The role is created by hand (a script, not CDK) on purpose: it's the identity that performs deploys, so
+# a deploy must never be able to widen its own permissions — and only THIS repo needs it, not every agent
+# stood up from this template.
 #
 # A fork gets the checks and nothing else: the role trusts only `refs/heads/main` of this exact repo,
 # so a pull request — including one from a fork — cannot assume it even if the workflow tried.
@@ -46,8 +47,13 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      # `npm ci` is itself part of the gate: it fails if a lockfile has drifted from its package.json,
+      # which `npm run check` cannot see. A rename of the workspace packages once broke exactly this and
+      # passed every local check.
       - run: npm ci
       - run: npm run check
+      - name: The runtime lockfile must match too — it's what the microVM image installs
+        run: cd runtime && npm ci --ignore-scripts
 
   # Deploy only from main, and only once the gate is green.
   deploy:

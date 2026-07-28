@@ -10,13 +10,12 @@
     "test": "vitest run",
     "synth": "cdk synth",
     "diff": "cdk diff",
-    "deploy": "cdk deploy --require-approval never --exclusively 'SlackDev-*'",
-    "destroy": "cdk destroy --exclusively 'SlackDev-*'",
+    "deploy": "cdk deploy --require-approval never",
+    "destroy": "cdk destroy",
     "invoke": "tsx scripts/invoke.ts",
     "github-app": "tsx scripts/create-github-app.ts",
     "slack-app": "tsx scripts/create-slack-app.ts",
-    "image": "bash microvm/build.sh",
-    "deploy:ci": "cdk deploy --require-approval never SlackDevCI"
+    "image": "bash microvm/build.sh"
   },
   "dependencies": {
     "@aws-sdk/client-cloudformation": "^3.1095.0",
