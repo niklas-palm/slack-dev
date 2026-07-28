@@ -1,0 +1,41 @@
+{
+  "name": "slack-dev-infra",
+  "version": "1.0.0",
+  "private": true,
+  "license": "MIT-0",
+  "type": "module",
+  "description": "Slack Dev infrastructure: thread\u2192microVM routing, the Slack webhook, and the CI deploy role.",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "synth": "cdk synth",
+    "diff": "cdk diff",
+    "deploy": "cdk deploy --require-approval never --exclusively 'SlackDev-*'",
+    "destroy": "cdk destroy --exclusively 'SlackDev-*'",
+    "invoke": "tsx scripts/invoke.ts",
+    "github-app": "tsx scripts/create-github-app.ts",
+    "slack-app": "tsx scripts/create-slack-app.ts",
+    "image": "bash microvm/build.sh",
+    "deploy:ci": "cdk deploy --require-approval never SlackDevCI"
+  },
+  "dependencies": {
+    "@aws-sdk/client-cloudformation": "^3.1095.0",
+    "@aws-sdk/client-ssm": "^3.1079.0",
+    "aws-cdk-lib": "^2.220.0",
+    "constructs": "^10.4.2",
+    "@aws-sdk/client-dynamodb": "^3.1096.0",
+    "@aws-sdk/signature-v4": "^3.374.0",
+    "@aws-sdk/credential-provider-node": "^3.972.73",
+    "@aws-crypto/sha256-js": "^5.2.0",
+    "@smithy/protocol-http": "^5.5.15"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "aws-cdk": "^2.1027.0",
+    "esbuild": "^0.25.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10",
+    "yaml": "^2.9.0"
+  }
+}

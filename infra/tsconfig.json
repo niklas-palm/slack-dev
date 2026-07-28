@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "strict": true,
+    // A sample must not ship dead imports; two survived a refactor before this was on.
+    "noUnusedLocals": true,
+    "noUncheckedIndexedAccess": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["bin/**/*.ts", "lib/**/*.ts", "lambda/**/*.ts", "scripts/**/*.ts", "test/**/*.ts"]
+}

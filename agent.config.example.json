@@ -1,0 +1,9 @@
+{
+  "name": "demo",
+  "displayName": "demo",
+  "description": "Slack-triggered engineering agent. Rename me: see setup.md step 2.",
+  "githubRepo": "OWNER/REPOSITORY",
+  "allowedChannels": [
+    "C0123456789"
+  ]
+}

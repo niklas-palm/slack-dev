@@ -1,0 +1,30 @@
+{
+  "name": "slack-dev",
+  "version": "1.0.0",
+  "private": true,
+  "license": "MIT-0",
+  "type": "module",
+  "description": "Slack Dev \u2014 a lightweight Slack agent with a GitHub repo and an AWS account, running in a Lambda MicroVM.",
+  "workspaces": [
+    "runtime",
+    "infra"
+  ],
+  "scripts": {
+    "check": "npm run typecheck --workspaces && npm run test --workspaces",
+    "typecheck": "npm run typecheck --workspaces",
+    "test": "npm run test --workspaces",
+    "synth": "npm run synth -w infra",
+    "image": "npm run image -w infra",
+    "deploy": "npm run deploy -w infra",
+    "deploy:ci": "npm run deploy:ci -w infra",
+    "destroy": "npm run destroy -w infra",
+    "secrets": "bash scripts/put-secrets.sh",
+    "invoke": "npm run invoke -w infra",
+    "github-app": "npm run github-app -w slack-dev-infra",
+    "slack-app": "npm run slack-app -w slack-dev-infra",
+    "docker": "bash scripts/run-local.sh"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

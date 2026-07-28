@@ -1,0 +1,26 @@
+{
+  "name": "slack-dev-runtime",
+  "version": "1.0.0",
+  "private": true,
+  "license": "MIT-0",
+  "type": "module",
+  "description": "Slack Dev runtime: the Strands agent that runs inside the Lambda MicroVM.",
+  "scripts": {
+    "start": "tsx src/server.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "local": "tsx src/local.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.1079.0",
+    "@aws-sdk/client-ssm": "^3.1079.0",
+    "@strands-agents/sdk": "^1.7.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
+  }
+}

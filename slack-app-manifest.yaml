@@ -1,0 +1,33 @@
+# Paste this into Slack: api.slack.com/apps → Create New App → From an app manifest.
+#
+# Change `name` and `display_name` to your agent's name — that's what people @-mention.
+#
+# Event Subscriptions are deliberately ABSENT: Slack rejects a manifest that declares `app_mention`
+# without a Request URL, and that URL doesn't exist until CDK has deployed. You enable events by hand
+# after deploying (setup.md step 5).
+_metadata:
+  major_version: 2
+  minor_version: 1
+display_information:
+  name: agent
+  description: Engineering agent running in an AWS Lambda MicroVM
+features:
+  bot_user:
+    display_name: agent
+    always_online: false
+oauth_config:
+  scopes:
+    bot:
+      - app_mentions:read # receive the @mention that triggers the agent
+      - channels:history # read thread context in public channels
+      - groups:history # …and in private channels
+      - chat:write # post its replies
+      - reactions:write # the 👀 / 🟡 / ❓ / 🟢 / 🔴 thread status
+      - files:read # read files a teammate attaches
+      - files:write # upload logs, diffs, screenshots
+settings:
+  interactivity:
+    is_enabled: false
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

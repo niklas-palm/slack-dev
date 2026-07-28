@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    // ES2024, not ES2023 like infra/: String.prototype.isWellFormed is how the tests assert that
+    // clipped tool output never contains a lone surrogate (which would kill a turn). Node 20+; the
+    // image is node:22, and setup.md already requires Node 22.
+    "lib": ["ES2024"],
+    "types": ["node"],
+    "strict": true,
+    // A sample must not ship dead imports; two survived a refactor before this was on.
+    "noUnusedLocals": true,
+    "noUncheckedIndexedAccess": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/**/*.ts"]
+}

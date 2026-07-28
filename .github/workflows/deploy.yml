@@ -1,0 +1,84 @@
+# Check every push and PR; deploy on merge to main.
+#
+# Auth is keyless via GitHub OIDC — there are NO AWS keys in this repo or in GitHub secrets. The only
+# value the workflow needs is the deploy role's ARN, which isn't sensitive (it's a repo VARIABLE, not
+# a secret). The role and its trust policy live in `infra/lib/ci-stack.ts`.
+#
+# ONE-TIME SETUP, in this order:
+#   1. env -u AWS_PROFILE npm run deploy:ci        # creates the OIDC provider + the deploy role
+#   2. copy the printed ARN into the repo: Settings → Secrets and variables → Actions → Variables →
+#      New variable, name AWS_DEPLOY_ROLE_ARN
+#   3. protect `main` — with this workflow, push access to main is deploy access.
+#
+# The CI stack is deployed by hand on purpose and is NOT in `npm run deploy`: it's the identity that
+# performs deploys, so a deploy must never be able to widen its own permissions.
+#
+# A fork gets the checks and nothing else: the role trusts only `refs/heads/main` of this exact repo,
+# so a pull request — including one from a fork — cannot assume it even if the workflow tried.
+#
+# If your clone sits BESIDE the project it looks after (what the create-slack-dev skill does) rather
+# than in its own repo, you don't need any of this — deploy from your laptop and delete this file.
+
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Never deploy the same target twice at once: a second push queues rather than racing an in-flight
+# image build. Don't cancel — a half-finished deploy is worse than a slow one.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # The gate: typecheck + the offline tests. No AWS credentials — this job needs none, and runs for
+  # pull requests from forks too.
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+
+  # Deploy only from main, and only once the gate is green.
+  deploy:
+    needs: check
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    # Scoped to this job, not the whole workflow: only this one exchanges an OIDC token for AWS
+    # credentials, and `check` runs on untrusted PR code.
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: eu-west-1 # the only region Lambda MicroVMs is available in
+
+      # Order matters. The image IS the agent (it carries PROMPT.md, the skills, the tools); the stack
+      # only routes to it. Building first means a fresh account has an image ARN in SSM before the
+      # ingress that reads it goes live — deploying first would leave a webhook pointing at nothing.
+      #
+      # AWS builds the image, not the runner: no Docker, no QEMU, no arm64 emulation here.
+      - name: Build and register the microVM image
+        run: npm run image
+
+      - name: Deploy the routing stack
+        run: npm run deploy

@@ -1,0 +1,9 @@
+node_modules
+dist
+*.tsbuildinfo
+**/*.test.ts
+vitest.config.ts
+# Scratch/debug files: never part of the image, and must not change its asset hash.
+*scratch*
+*probe*
+redtest*
