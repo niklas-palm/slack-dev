@@ -332,7 +332,7 @@ others. The 👀 acknowledgement stays. The runtime already set 🟡 working, so
         // one retry, then stop asking: the reply already landed, and the runtime marks the thread at the
         // end of the turn regardless, so a missing colour is not worth more of it.
         const hint = turn.statusFailed
-          ? "do NOT retry — this failure is not transient. The runtime marks the thread when the turn ends. Carry on."
+          ? "do NOT retry — this failure is not transient. The runtime attempts the reaction again when the turn ends; if Slack keeps refusing, the thread simply has no colour. Carry on."
           : "try set_thread_status again, once. If it fails the same way, it is not transient.";
         turn.statusFailed = true;
         return {
@@ -371,7 +371,8 @@ to continue. Use this when a request is genuinely ambiguous or a decision is the
 confirm routine steps.
 
 If Slack rejects the ❓ this returns success:false and the turn does NOT end. The question itself already
-posted, so do NOT call this again — calling it again re-posts the question. Read the hint.`,
+posted, so a retry must use the IDENTICAL wording — that re-sets the reaction without posting again.
+Read the hint.`,
   inputSchema: z.object({
     question: z.string().min(1).describe("The question, in Slack mrkdwn."),
   }),
@@ -400,18 +401,22 @@ posted, so do NOT call this again — calling it again re-posts the question. Re
     return withTurn(turn, async () => {
       const ok = await setThreadStatus(turn.target, "waiting");
       if (!ok) {
-        // The QUESTION landed — only the ❓ didn't. So never say "call ask_user again": that re-posts the
-        // question (dedupe keys on the text, so a reworded one gets through), and on a permanent refusal
-        // it loops for ever. Same lesson as set_thread_status above: our hint drove the loop.
-        turn.statusFailed = true;
+        // The QUESTION landed — only the ❓ didn't, so the turn would end `replied:false, status:null` and
+        // the runtime would post "I didn't manage to post an answer" under a question that IS there.
+        // One identical retry fixes that and cannot double-post: postOnce dedupes on kind+text, so the
+        // same question posts once and only the reaction is retried. Say IDENTICAL explicitly — a
+        // reworded retry is a different key and would post twice.
+        //
+        // Deliberately NOT touching `turn.statusFailed`: this tool never reads it, so writing it only
+        // disarmed set_thread_status's own first retry later in the same turn (a rate-limited ❓ then made
+        // a good answer end with a spurious "I may not have finished everything").
         return {
           success: false,
           ts: r.ts,
           error: "the question posted, but Slack did not accept the waiting reaction",
-          hint: "do NOT call ask_user again — the question is already in the thread and would be re-posted. Stop here; the person has been asked.",
+          hint: "call ask_user once more with the IDENTICAL question — that retries only the ❓ and cannot re-post it. If it fails again, stop: the person has been asked.",
         };
       }
-      turn.statusFailed = false;
       turn.status = "waiting";
       return { success: true, ts: r.ts, duplicate: r.duplicate, waiting: true };
     });

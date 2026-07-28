@@ -61,8 +61,14 @@ Four properties of the gate are load-bearing:
 again", so the model tried again — for ever, when the refusal was permanent (`message_not_found` on a
 deleted trigger message). One live turn called `set_thread_status` three times on the same dead message.
 The loop was OURS: the model was obeying our hint. So the first failure invites exactly one retry and
-every later one says *don't*, and `ask_user` never says "call ask_user again" at all — that would re-post
-the question, not just the reaction.
+every later one says *don't*. `ask_user` invites one too, but insists on the **identical** question —
+`postOnce` dedupes on kind+text, so the same wording retries only the reaction while a reworded one posts
+twice.
+
+The flag belongs to `set_thread_status` alone. `ask_user` briefly wrote it as well, which bought nothing
+(it never read it) and broke the reset: a rate-limited ❓ made the FIRST failure of a later
+`set_thread_status` look like the second, so a good answer ended with a spurious ⚠️. If you ever want
+per-tool give-up for `ask_user`, give it its own field.
 
 This is the one piece of per-turn state that is **stored rather than derived**, against the rule above,
 because "have we already asked for a retry?" isn't recoverable from anything Slack tells us. Two things

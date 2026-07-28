@@ -474,7 +474,11 @@ Available in the image: git, gh, curl, jq, ripgrep, openssl, node, npm, python3.
         result.error_summary = `timed out after ${seconds}s`;
         // No "background it with nohup" advice here, however tempting: a grandchild that escapes the
         // process group is the exact case runChild's `exit`-not-`close` comment above exists for.
-        result.hint = `raise \`timeout\` (max 900) — a build or a full test suite often needs it. If it still won't fit, run the slow part alone rather than chaining commands.`;
+        // Not a constant: at the 900s cap "raise the timeout" is advice the model cannot act on.
+        result.hint =
+          seconds < 900
+            ? `raise \`timeout\` (max 900) — a build or a full test suite often needs it.`
+            : `already at the 900s maximum, so split the work: run the slow step alone rather than chaining commands, and narrow it (one package, one suite). Partial stdout above is kept.`;
       }
       else if (r.code !== 0) result.error_summary = clip(r.stderr.trim() || `exit code ${r.code}`, 500);
       return result;

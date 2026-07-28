@@ -241,11 +241,28 @@ describe("set_thread_status", () => {
       expect(r.success).toBe(false);
       hints.push(r.hint!);
     }
-    expect(hints[0]).toMatch(/again/);
-    // The invariant, asserted without coupling to the wording: from the second failure on, the hint must
-    // stop inviting a retry. Otherwise the model keeps burning the turn on a colour it can never set.
-    expect(hints[1]).not.toMatch(/again/);
-    expect(hints[2]).not.toMatch(/again/);
+    // The invariant: the first failure invites one retry, and from the second on the hint tells the model
+    // to stop. Asserted on the instruction, not on the word "again" — the give-up text legitimately
+    // contains "again" ("the runtime attempts the reaction again when the turn ends").
+    expect(hints[0]).toMatch(/try set_thread_status again/);
+    expect(hints[1]).toMatch(/do NOT retry/);
+    expect(hints[2]).toMatch(/do NOT retry/);
+  });
+
+  // Cross-tool version of the same trap: ask_user's failed ❓ used to set the shared flag, so the FIRST
+  // failure of a later set_thread_status was treated as the second and told not to retry — ending a good
+  // answer with a spurious "I may not have finished everything". ask_user never read that flag anyway.
+  it("a rate-limited ask_user does not disarm set_thread_status's first retry", async () => {
+    const t = turn();
+    responses = [{ ok: true, ts: "5.0" }, { ok: true }, { ok: true }, { ok: true }, { ok: false, error: "ratelimited" }];
+    await call("ask_user", { question: "Which env?" }, t);
+
+    responses = [];
+    await call("reply_to_thread", { text: "It's staging." }, t);
+
+    responses = [{ ok: true }, { ok: true }, { ok: true }, { ok: false, error: "ratelimited" }];
+    const st = (await call("set_thread_status", { status: "done" }, t)) as Record<string, string>;
+    expect(st.hint, "attempt #1 for THIS tool must still invite a retry").toMatch(/try set_thread_status again/);
   });
 
   // A transient blip early in a turn must not disarm the retry the CLOSING status is entitled to. The
@@ -263,7 +280,7 @@ describe("set_thread_status", () => {
 
     responses = [{ ok: true }, { ok: true }, { ok: true }, { ok: false, error: "ratelimited" }];
     const again = (await call("set_thread_status", { status: "done" }, t)) as Record<string, string>;
-    expect(again.hint, "a fresh failure after a success is attempt #1, not #2").toMatch(/again/);
+    expect(again.hint, "a fresh failure after a success is attempt #1, not #2").toMatch(/try set_thread_status again/);
   });
 
   it("never touches the 👀 acknowledgement", async () => {
@@ -326,7 +343,7 @@ describe("set_thread_status", () => {
       t.status,
       "recording it would tell the runtime the thread is closed when it shows 🟡",
     ).toBeNull();
-    expect(String(result.hint)).toMatch(/again/); // the model must know to retry
+    expect(String(result.hint), "the model must know to retry").toMatch(/try set_thread_status again/);
   });
 
   it("only accepts the two terminal statuses", async () => {
@@ -427,7 +444,9 @@ describe("a rejected Slack reaction", () => {
       "claiming waiting would skip the terminal-status guarantee",
     ).toBe(false);
     expect(t.status).toBeNull();
-    expect(String(result.hint)).toMatch(/again/);
+    // NOT a bare /again/: "do NOT call ask_user again" matches that too, so the assertion would have
+    // passed while asserting the opposite. Pin what the hint actually has to say — retry, same wording.
+    expect(String(result.hint)).toMatch(/IDENTICAL/);
   });
 });
 
