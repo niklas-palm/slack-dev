@@ -11,16 +11,22 @@ Slack app are scripted, so standing one up is three clicks and one copied value.
 
 ## Let your coding agent set it up
 
+Run this **from the repo you want an agent for**:
+
 ```bash
-npx slack-dev-skill        # installs the `create-slack-dev` skill
+npx github:niklas-palm/slack-dev
 ```
 
-Then, in the repo you want an agent for, just ask: **"create a slack agent for this repo"**. Your agent
-gathers the few things it must not guess, registers the GitHub App, deploys, and walks you through the
-handful of clicks that have no API. It writes the skill for **Claude Code** (`~/.claude/skills/`) and, if
-the directory has an `AGENTS.md`, adds a pointer there for **Codex** and other AGENTS.md-based agents.
+Then just ask: **"create a slack agent for this repo"**. Your agent gathers the few things it must not
+guess, registers the GitHub App, deploys, and walks you through the handful of clicks that have no API.
 
-No npm? The skill is just markdown — [`skills/create-slack-dev/`](./skills/create-slack-dev) in this repo:
+That command installs nothing globally and needs no registry — it runs
+[`skills/install.mjs`](./skills/install.mjs) straight from this repo, which copies the skill to
+`~/.claude/skills/` for **Claude Code** and, if the directory has an `AGENTS.md`, appends a pointer there
+for **Codex** and other AGENTS.md-based agents. Re-run it any time to pick up a newer version;
+`--uninstall` removes it, and `--where` shows what it would touch without writing anything.
+
+No npx? The skill is only markdown — copy the folder:
 
 ```bash
 git clone https://github.com/niklas-palm/slack-dev
@@ -205,7 +211,7 @@ Harden command execution before pointing this at untrusted users.
 │   └── scripts/          create-github-app · create-slack-app · invoke · cli
 ├── CLAUDE.md             ← house rules + commands: the entry point for a coding agent
 ├── .github/workflows/    ← THIS repo's own deploy (keyless OIDC). Delete it in a clone.
-├── skills/               ← the create-slack-dev INSTALLER skill (`npx slack-dev-skill`)
+├── skills/               ← the create-slack-dev INSTALLER skill + install.mjs
 │                            — not the agent's own skills, which live in runtime/skills/
 ├── scripts/put-secrets.sh        manual/rotation path for any secret
 ├── slack-app-manifest.yaml       the by-hand fallback

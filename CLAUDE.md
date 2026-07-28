@@ -46,7 +46,9 @@ yes, which of these did I update?
 - **`skills/create-slack-dev/`** — the INSTALLER skill, which is how most people will set an agent up.
   **The copy in this repo is the source of truth**; `~/.claude/skills/` is just an install of it, so edit
   the repo and re-run `node skills/install.mjs`. If a command, permission or region changed, it changed
-  in the skill and its `references/` too.
+  in the skill and its `references/` too. Users get it with `npx github:niklas-palm/slack-dev`, which runs
+  straight from the repo — so there is nothing to publish and no version to bump, and a merge to `main` IS
+  the release.
 
 Then, before you call it done:
 
@@ -114,7 +116,7 @@ Slack @mention → API Gateway → ingress Lambda        (verify HMAC · channel
 - `runtime/` — the agent. One image, which is both the microVM image and what `npm run docker` runs.
 - **Two different "skills"**, easy to confuse: `runtime/skills/` are the AGENT's skills, shipped in its
   image and loaded on demand at run time. `skills/create-slack-dev/` is the INSTALLER skill a human's
-  coding agent reads to set all this up. Published as `npx slack-dev-skill`.
+  coding agent reads to set all this up. Installed with `npx github:niklas-palm/slack-dev`.
 - `infra/lib/stack.ts` — the whole stack. `infra/lambda/slack-events/` — the ingress and the microVM
   client. `infra/microvm/build.sh` — the image build (not CDK: CloudFormation has no resource type).
 - **Region is `eu-west-1`**, the only one Lambda MicroVMs exists in. Opus 5 is ACTIVE there too.

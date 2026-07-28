@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "license": "MIT-0",
+  "bin": {
+    "slack-dev-skill": "skills/install.mjs"
+  },
   "type": "module",
   "description": "Slack Dev \u2014 a lightweight Slack agent with a GitHub repo and an AWS account, running in a Lambda MicroVM.",
   "workspaces": [

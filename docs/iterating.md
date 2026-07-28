@@ -2,7 +2,8 @@
 
 > **Two different things are called "skills" here.** This page is about `runtime/skills/` — the AGENT's
 > skills, which ship in its image and shape what it can do. The repo also has `skills/create-slack-dev/`,
-> which is the installer a human's coding agent reads to set the whole thing up (`npx slack-dev-skill`).
+> which is the installer a human's coding agent reads to set the whole thing up
+> (`npx github:niklas-palm/slack-dev`).
 > Editing one has nothing to do with the other.
 
 Two files decide what your agent knows and can do. Both live in `runtime/`, both are plain markdown, and

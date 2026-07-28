@@ -1,9 +1,13 @@
 #!/usr/bin/env node
 // Install the `create-slack-dev` skill so your coding agent can stand up a Slack Dev agent for you.
 //
-//   npx slack-dev-skill              # install (or update) it
-//   npx slack-dev-skill --where      # just print where things would go
-//   npx slack-dev-skill --uninstall
+//   npx github:niklas-palm/slack-dev              # install (or update) it
+//   npx github:niklas-palm/slack-dev --where      # just print where things would go
+//   npx github:niklas-palm/slack-dev --uninstall
+//
+// Run straight from the repo — no registry, nothing published, so a user always gets the current skill
+// and there's no version to keep in sync. The root package.json's `bin` is what makes `npx github:…`
+// find this file.
 //
 // Why a script rather than "copy this folder": there is no shared skill format. Claude Code reads
 // ~/.claude/skills/<name>/SKILL.md; Codex and several others read an AGENTS.md in the working directory.
@@ -123,6 +127,6 @@ else if (arg === "--where") {
   console.log(`skill      → ${claudeSkill}`);
   console.log(`AGENTS.md  → ${agentsFile}${existsSync(agentsFile) ? "" : "  (absent; would be skipped)"}`);
 } else if (arg && arg !== "install") {
-  console.error(`Usage: npx slack-dev-skill [install|--where|--uninstall]`);
+  console.error(`Usage: npx github:niklas-palm/slack-dev [install|--where|--uninstall]`);
   process.exit(1);
 } else install();
