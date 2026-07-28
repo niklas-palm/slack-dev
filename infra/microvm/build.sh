@@ -78,7 +78,7 @@ aws s3 cp "$STAGE/image.zip" "s3://${BUCKET}/${IMAGE_NAME}/image.zip" --region "
 # Hooks: `ready` fires once at build time and 200 is the signal to snapshot — everything slow is already
 # baked by the Dockerfile, so the server answers immediately. The per-VM hooks let the agent survive an
 # idle-suspend with its conversation intact.
-HOOKS='{"port":9000,"microvmImageHooks":{"ready":"ENABLED","readyTimeoutInSeconds":300},"microvmHooks":{"run":"ENABLED","runTimeoutInSeconds":30,"resume":"ENABLED","resumeTimeoutInSeconds":30,"suspend":"ENABLED","suspendTimeoutInSeconds":30,"terminate":"ENABLED","terminateTimeoutInSeconds":30}}'
+HOOKS='{"port":9000,"microvmImageHooks":{"ready":"ENABLED","readyTimeoutInSeconds":300},"microvmHooks":{"run":"ENABLED","runTimeoutInSeconds":30,"resume":"ENABLED","resumeTimeoutInSeconds":30,"suspend":"ENABLED","suspendTimeoutInSeconds":30,"terminate":"ENABLED","terminateTimeoutInSeconds":60}}'
 
 # 4 GB (≈2 vCPU). The agent is I/O-bound on the model, but a `docker compose up` of a real project needs
 # room — and the default 2 GB/1 vCPU makes builds and test runs inside the VM slow.

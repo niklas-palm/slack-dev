@@ -29,7 +29,7 @@ import {
 } from "@aws-sdk/client-cloudformation";
 
 import { REGION } from "../lib/config.js";
-import { arg, openBrowser, requireConfig } from "./cli.js";
+import { arg, openBrowser, requireConfig, rejectUnknownFlags } from "./cli.js";
 import { nextStep } from "./slack-setup-state.js";
 
 /** Shared across every agent, so it lives outside the per-agent prefix. */
@@ -218,6 +218,8 @@ function manifest(name: string, description: string, requestUrl: string) {
 // history — and if an AI agent is driving the setup, in the transcript too. `SLACK_CONFIG_REFRESH_TOKEN=…`
 // (or a piped stdin) lets the human keep the secret in their own shell while an agent runs everything
 // else. Same reasoning as the bot token below.
+rejectUnknownFlags(["refresh-token", "app-name"]);
+
 const provided =
   arg("refresh-token") ?? process.env.SLACK_CONFIG_REFRESH_TOKEN?.trim();
 if (provided) {

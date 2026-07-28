@@ -17,8 +17,9 @@ import { type Agent, ContextWindowOverflowError } from "@strands-agents/sdk";
 import { buildAgent, deliver, drain, runAgent } from "./agent.js";
 import { HOOK_PORT } from "./config.js";
 import { emit } from "./emit.js";
+import { invokeGate } from "./invoke-gate.js";
 import { loadSecretsFromSsm } from "./secrets.js";
-import { postMessage, setThreadStatus } from "./slack.js";
+import { alsoReactTo, NO_BOT_TOKEN, postMessage, setThreadStatus } from "./slack.js";
 import {
   type SlackTurn,
   isWaiting,
@@ -44,12 +45,22 @@ const HOOK_BASE = "/aws/lambda-microvms/runtime/v1";
  * Returns immediately either way — the work takes minutes and the caller is a Lambda on Slack's 3s
  * clock. Progress and the answer reach the human through the agent's own Slack tools.
  */
-function handleInvoke(body: Record<string, unknown>): Record<string, unknown> {
+async function handleInvoke(
+  body: Record<string, unknown>,
+): Promise<{ status: number; body: Record<string, unknown> }> {
   const sessionId = String(body.sessionId ?? body.session_id ?? "default");
   const raw = body.prompt;
   const text =
     typeof raw === "string" ? raw : raw != null ? JSON.stringify(raw) : "";
-  if (!text) return { status: "rejected", error: "missing 'prompt' in payload" };
+
+  // One more read before refusing: /run's may have failed on a transient SSM/KMS error, and refusing a
+  // turn the VM could serve is the worse outcome. Rules in invoke-gate.ts, where they're testable.
+  if (!process.env.SLACK_BOT_TOKEN) await ensureSecrets({ retry: true });
+  const gate = invokeGate(text, Boolean(process.env.SLACK_BOT_TOKEN));
+  if (!gate.ok) {
+    emit("invoke_refused", { session_id: sessionId, status: gate.status, error: gate.error });
+    return { status: gate.status, body: { status: "rejected", error: gate.error } };
+  }
 
   // The Slack ids go into per-turn STATE that the Slack tools read — never into the prompt. The model
   // therefore has no way to name a channel, so it can only ever reply where it was summoned.
@@ -60,12 +71,17 @@ function handleInvoke(body: Record<string, unknown>): Record<string, unknown> {
   // and landing after the PR is open. See deliver() in agent.ts.
   if (running.has(sessionId)) {
     deliver(sessionId, text);
+    // The injected mention has its OWN trigger message, and the running turn only knows the first one —
+    // so a correction kept a bare 👀 for ever while the turn it joined went 🟢 on an older message.
+    const live = turns.get(sessionId);
+    const extra = slackTurn?.target.trigger_message_ts;
+    if (live && extra) alsoReactTo(live.target, extra);
     emit("message_injected", { session_id: sessionId, chars: text.length });
-    return { status: "injected", session_id: sessionId };
+    return { status: 200, body: { status: "injected", session_id: sessionId } };
   }
 
   void queue(sessionId, text, slackTurn).catch(reportError);
-  return { status: "accepted", session_id: sessionId };
+  return { status: 200, body: { status: "accepted", session_id: sessionId } };
 }
 
 function queue(
@@ -101,7 +117,10 @@ function queue(
           void queue(
             sessionId,
             late.join("\n"),
-            slackTurn && newSlackTurn(slackTurn.target),
+            // Drop `alsoReactTo`: those timestamps belong to the turn that just ended and already carry
+            // its terminal reaction. Inherited, they'd accumulate down a long thread and every later
+            // status change would re-react to messages settled turns ago.
+            slackTurn && newSlackTurn({ ...slackTurn.target, alsoReactTo: undefined }),
           );
         }
       }
@@ -250,25 +269,33 @@ async function readJson(
 /**
  * Resolve the SSM secrets onto process.env, once per VM.
  *
- * `/run` is delivered at least once and `/resume` may fire many times, so this latches on SUCCESS only —
- * a failed read is retried by the next hook rather than leaving the VM to serve turns with no
- * credentials. It does not re-read after a success: `loadSecretsFromSsm` skips any var already set, so a
- * rotation mid-life would need an overwrite there, not a flag here. A VM lives at most 8h, so the next
- * one picks up a rotated secret anyway.
+ * `/run` is delivered at least once and `/resume` may fire many times, so this latches rather than
+ * re-reading on every hook — but ONLY on a genuine success. A read that failed must stay un-latched so
+ * the next hook retries it; latching regardless is what let a VM run its whole life mute after one
+ * transient SSM error. `retry` forces an attempt even when latched (/invoke's last chance before it
+ * refuses the turn).
+ *
+ * It never re-reads a var that IS set, so a mid-life rotation doesn't land — see the note printed by
+ * scripts/put-secrets.sh. A VM lives at most 8h, so the next one picks it up.
  */
 let secretsLoaded = false;
-async function ensureSecrets(): Promise<void> {
-  if (secretsLoaded) return;
-  try {
-    await loadSecretsFromSsm();
-    secretsLoaded = true;
-  } catch (err) {
-    // Don't latch on failure — the next hook should try again rather than run without credentials.
-    emit("secrets_unavailable", {
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
+async function ensureSecrets({ retry = false }: { retry?: boolean } = {}): Promise<void> {
+  if (secretsLoaded && !retry) return;
+  const failed = await loadSecretsFromSsm().catch((err) => {
+    emit("secrets_unavailable", { error: err instanceof Error ? err.message : String(err) });
+    return ["*"];
+  });
+  if (failed.length) emit("secrets_unavailable", { targets: failed });
+  else secretsLoaded = true;
 }
+
+/**
+ * How long /terminate spends telling people their turn died, before answering the hook anyway.
+ *
+ * Comfortably inside the API's 60s ceiling for this hook: overrunning it means the handler is killed
+ * mid-loop, so threads it hadn't reached yet get NOTHING — worse than a partial sweep.
+ */
+const TERMINATE_BUDGET_MS = 45_000;
 
 const server = createServer((req, res) => {
   const send = (code: number, obj: unknown): void => {
@@ -307,7 +334,7 @@ const server = createServer((req, res) => {
             "[ALERT] SLACK_BOT_TOKEN is not set — the agent cannot reply, react, or report failures. " +
               "Check SLACK_BOT_TOKEN_PARAM and that the microVM execution role may read + decrypt it.",
           );
-          return send(500, { ok: false, error: "SLACK_BOT_TOKEN unavailable" });
+          return send(500, { ok: false, error: NO_BOT_TOKEN });
         }
         return send(200, { ok: true });
       }
@@ -317,14 +344,24 @@ const server = createServer((req, res) => {
         await ensureSecrets();
         return send(200, { ok: true });
       }
+      // A working turn generates no INBOUND traffic, so a long one can be suspended mid-flight and thaw
+      // into a dead socket. Nothing in here can prevent it — log it so the symptom is diagnosable.
+      // See docs/lambda-microvms.md#idle-suspend-and-lifetime.
       if (path === `${HOOK_BASE}/suspend` && req.method === "POST") {
+        if (running.size > 0) emit("suspended_mid_turn", { sessions: [...running] });
         return send(200, { ok: true }); // nothing to flush; state lives in memory across suspend
       }
       // The VM is going away — at its 8h ceiling, or after too long suspended. Any turn in flight dies
       // with it, so the runtime's promise that a thread never ends on 🟡 would be broken: no reply, no
-      // 🔴, just a busy-looking thread forever. Say so while there's still time (the hook has 60s).
+      // 🔴, just a busy-looking thread forever. Say so while there's still time.
+      //
+      // 60s is the API's MAXIMUM for this hook (terminateTimeoutInSeconds, min 1 / max 60), so there is
+      // no headroom to buy if the work overruns — and the work is Slack calls, which can each take the
+      // full 8s timeout. Sessions run concurrently, but within one the message and the status sweep are
+      // serial, so a bad case is real. Race the whole thing against our own deadline and let the message
+      // win: "your work died" is the part a person needs; the 🔴 is decoration on top of it.
       if (path === `${HOOK_BASE}/terminate` && req.method === "POST") {
-        await Promise.all(
+        const notifyAll = Promise.all(
           [...running].map(async (sessionId) => {
             const turn = turns.get(sessionId);
             if (!turn) return;
@@ -336,12 +373,20 @@ const server = createServer((req, res) => {
             await setThreadStatus(turn.target, "failed").catch(() => undefined);
           }),
         );
+        const finished = await Promise.race([
+          notifyAll.then(() => true),
+          new Promise<false>((r) => setTimeout(() => r(false), TERMINATE_BUDGET_MS)),
+        ]);
+        // Returning before the sweep finishes is deliberate: a 200 now beats being killed mid-loop, which
+        // is what left the remaining threads un-notified entirely.
+        if (!finished) emit("terminate_notice_incomplete", { sessions: running.size });
         return send(200, { ok: true });
       }
 
       // --- the agent surface -------------------------------------------------------------------
       if (path === "/invoke" && req.method === "POST") {
-        return send(200, handleInvoke(await readJson(req)));
+        const result = await handleInvoke(await readJson(req));
+        return send(result.status, result.body);
       }
       if (path === "/healthz") return send(200, { ok: true });
       send(404, { error: "not found" });

@@ -111,6 +111,11 @@ still time to act on it, rather than after the PR is open.
 
 No cancellation semantics: the agent simply learns something new mid-thought and decides what to do.
 
+The interrupting message keeps its own 👀 and gets the turn's terminal 🟢/🔴 too, so the person who sent it
+sees an acknowledgement rather than a reaction that only ever landed on someone else's message. That is
+capped at the few most recent (each extra one costs Slack calls on every status change), and a reaction
+failing on one of them never marks the turn itself as failed.
+
 ## Capabilities
 
 **Work tools** (`runtime/src/tools.ts`): `read_file`, `write_file`, `edit_file`, `multi_edit`,
@@ -268,10 +273,13 @@ before changing `slack-tools.ts` or a runtime dependency. **Working on this with
 - **No web-search tool and no hardened fetcher.** `curl` inside `run_bash` is the only web access, with
   no SSRF guard, size cap, or content-type check. Fine for a trusted workspace fetching a doc page; port
   a real fetcher with those guards if you need research.
-- **Cost is per warm thread.** Each Slack thread runs a 4 GB microVM that suspends after 15 minutes idle
+- **Cost is per warm thread.** Each Slack thread runs a 4 GB microVM that suspends after 45 minutes idle
   (compute billing stops) and is terminated at 8h. So you pay for minutes of active work per thread, not
   for the whole day — but an agent left thinking in ten threads is ten VMs. Tune `idleSessionTimeout`
   (`infra/lib/config.ts`) and the memory in `infra/microvm/build.sh`.
+  **Careful lowering it:** idle is measured by *inbound* traffic only, so a turn that runs longer than the
+  window is suspended mid-work and thaws into an error. See
+  [docs/lambda-microvms.md](./docs/lambda-microvms.md#idle-suspend-and-lifetime).
 
 ## Contributing & security
 

@@ -43,9 +43,15 @@ export interface AgentConfig {
    * (the service ceiling), and suspending doesn't shorten it: a suspended VM auto-resumes on the next
    * mention with its memory, and therefore the whole conversation, intact.
    *
-   * This is the cost knob. Compute billing stops while suspended, so 15 minutes means a thread costs
-   * for the minutes it's actually being worked on rather than the whole 8h window. Setting it TO 8h
-   * would mean a VM can never suspend before it's terminated — every thread billing the full window.
+   * This is the cost knob. Compute billing stops while suspended, so a thread costs for the time it is
+   * actually being worked on rather than the whole 8h window. Setting it TO 8h would mean a VM can never
+   * suspend before it's terminated — every thread billing the full window.
+   *
+   * But it also has a FLOOR. The idle timer counts inbound traffic through the proxy endpoint only, and a
+   * turn in flight generates none (its work is all outbound: Bedrock, git, the Slack API). So a turn
+   * running longer than this window is suspended mid-flight and thaws into a dead socket on the next
+   * mention — a spurious error after a long silence. `run_bash` alone permits 900s per call, so keep this
+   * comfortably above the longest turn you expect. 45 min bounds cost while leaving real headroom.
    */
   idleSessionTimeout: number;
 }
@@ -134,6 +140,6 @@ export function loadConfig(root: string = REPO_ROOT): AgentConfig {
     stackName: `SlackDev-${name.replace(/(^|-)([a-z0-9])/g, (_, __, c: string) => c.toUpperCase())}`,
     ssmPrefix: `/slack-dev/${name}`,
     imageName: `slack-dev-${name}`,
-    idleSessionTimeout: 900,
+    idleSessionTimeout: 2_700,
   };
 }

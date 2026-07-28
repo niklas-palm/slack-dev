@@ -35,7 +35,7 @@ const SESSION_TABLE = process.env.SESSION_TABLE!;
 const IMAGE_ARN_PARAM = process.env.MICROVM_IMAGE_ARN_PARAM!;
 const VM_ROLE_ARN = process.env.MICROVM_ROLE_ARN!;
 /** Idle seconds before a VM suspends — NOT its lifetime (a fixed 8h). See infra/lib/config.ts. */
-const IDLE_SECONDS = Number(process.env.MICROVM_IDLE_SECONDS ?? 900);
+const IDLE_SECONDS = requireSeconds("MICROVM_IDLE_SECONDS");
 
 /** The port the agent serves on inside the VM (runtime/src/config.ts HOOK_PORT). */
 const AGENT_PORT = 9000;
@@ -136,8 +136,40 @@ export function sessionIdFor(threadTs: string): string {
   return `slack-${threadTs}`.replace(/[^a-zA-Z0-9_.-]/g, "_");
 }
 
+/**
+ * A required numeric env var, or a loud failure at module load.
+ *
+ * `Number(undefined)` is NaN, and NaN serialises to `null` in the run-microvm body — where
+ * maxIdleDurationSeconds is REQUIRED, so every mention needing a fresh VM would fail a validation check
+ * far from the cause. The stack always sets it; this is for the hand-rolled or half-configured Lambda.
+ */
+function requireSeconds(name: string): number {
+  const value = Number(process.env[name]);
+  if (!Number.isFinite(value)) throw new Error(`${name} must be a number, got ${process.env[name]}`);
+  return value;
+}
+
+/**
+ * Is a failed /invoke worth another attempt?
+ *
+ * Retrying is right for a VM that isn't forwarding traffic yet — a fresh one takes a few seconds. It is
+ * wrong for a 4xx, which is the agent REFUSING: an empty prompt is empty however many times we send it,
+ * and the retries burn the budget the failure notice needs. See runtime/src/invoke-gate.ts for the
+ * statuses it returns.
+ */
+export function worthRetrying(status: number): boolean {
+  return status >= 500;
+}
+
 export function stripMention(text: string): string {
-  return text.replace(/<@[A-Z0-9]+>\s*/g, "").trim();
+  // Slack encodes a mention two ways: `<@U123>` and the labelled `<@U123|name>`. Missing the labelled
+  // form left the raw token in the prompt, where the model could echo it back and re-ping someone.
+  //
+  // The prefix stays OPEN (`[A-Z0-9]+`, not `[UW]`): `U` is a user, `W` an Enterprise Grid user, `B` a
+  // bot — and narrowing it to the two we could name reintroduced the same leak for the rest. Nothing else
+  // in Slack's syntax starts with `<@`, so channel links (`<#C1|general>`) and user-group pings
+  // (`<!subteam^S1>`) are untouched either way; a test pins that.
+  return text.replace(/<@[A-Z0-9]+(?:\|[^>]*)?>\s*/g, "").trim();
 }
 
 async function slackCall(
@@ -346,6 +378,7 @@ async function invokeAgent(
         return;
       }
       lastError = `HTTP ${res.status}: ${res.body.slice(0, 200)}`;
+      if (!worthRetrying(res.status)) break;
     } catch (e) {
       lastError = String(e).slice(0, 200);
     }

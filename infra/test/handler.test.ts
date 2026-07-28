@@ -10,8 +10,11 @@ process.env.MICROVM_IMAGE_ARN_PARAM = "/slack-dev/test/microvm-image-arn";
 process.env.MICROVM_ROLE_ARN = "arn:aws:iam::123456789012:role/test";
 process.env.SIGNING_SECRET_PARAM = "/slack-dev/test/slack-signing-secret";
 process.env.BOT_TOKEN_PARAM = "/slack-dev/test/slack-bot-token";
+// Required, with no fallback on purpose: NaN here would serialise to null in a required run-microvm field
+// and fail every fresh-VM mention. The stack always sets it (pinned in stack.test.ts).
+process.env.MICROVM_IDLE_SECONDS = "2700";
 
-const { channelAllowed, sessionIdFor, stripMention, verifySignature } =
+const { channelAllowed, sessionIdFor, stripMention, verifySignature, worthRetrying } =
   await import("../lambda/slack-events/handler.js");
 
 const SECRET = "test-signing-secret";
@@ -129,6 +132,44 @@ describe("stripMention", () => {
 
   it("leaves plain text alone", () => {
     expect(stripMention("no mention here")).toBe("no mention here");
+  });
+
+  it("removes the labelled mention form", () => {
+    expect(stripMention("<@U123ABC|agent> check the logs")).toBe("check the logs");
+  });
+
+  it("treats a bare labelled mention as empty, like a bare plain one", () => {
+    expect(stripMention("<@U123ABC|agent>")).toBe("");
+    expect(stripMention("<@U123ABC>")).toBe("");
+  });
+
+  // U = user, W = Enterprise Grid user, B = bot. All three are mentions; anchoring the regex on just the
+  // ones we could name off-hand left the others sitting in the prompt for the model to echo back.
+  it("removes a mention whatever the id prefix", () => {
+    expect(stripMention("<@W012345> deploy")).toBe("deploy");
+    expect(stripMention("<@BU123> deploy")).toBe("deploy");
+  });
+
+  // NOT a user mention: a channel link (`<#C123|general>`) and a user-group ping must survive, or the
+  // agent loses the very reference the question was about.
+  it("leaves channel links and other Slack entities intact", () => {
+    expect(stripMention("<@U1> compare <#C0ABC|general> and <!subteam^S1|@team>")).toBe(
+      "compare <#C0ABC|general> and <!subteam^S1|@team>",
+    );
+  });
+});
+
+// The runtime refuses a turn it can't serve by returning a non-2xx (see runtime/src/invoke-gate.ts). That
+// only works if the ingress tells the two kinds apart: retry a VM that isn't up yet, give up on a refusal.
+describe("worthRetrying", () => {
+  it("retries while the VM may still be coming up", () => {
+    expect(worthRetrying(502)).toBe(true);
+    expect(worthRetrying(503)).toBe(true); // the runtime's "no bot token yet" — a re-read may fix it
+  });
+
+  it("does not retry a refusal", () => {
+    expect(worthRetrying(400)).toBe(false); // an empty prompt stays empty
+    expect(worthRetrying(404)).toBe(false);
   });
 });
 
