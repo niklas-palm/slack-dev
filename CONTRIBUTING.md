@@ -125,6 +125,18 @@ env -u AWS_PROFILE npm run image                 # register it as a microVM imag
 only local loop that catches image-shaped bugs — a missing binary, the wrong Node major, dockerd failing
 to start. Three real ones were found that way, each invisible to `npm run check`.
 
+**It fills your disk, so reclaim it periodically.** Each build adds layers and build cache, and a few
+rounds — or several agents building in parallel — reach tens of GB:
+
+```bash
+npm run reclaim              # report what's reclaimable, change nothing
+npm run reclaim -- --yes     # reclaim it (Docker build cache + images, npm's package cache)
+```
+
+Do it *before* you run low, not after. At zero bytes free Docker Desktop can't start, so `docker prune`
+— the fix — can't run either; the only way out is deleting `~/Library/Containers/com.docker.docker/Data/
+vms/0/data/Docker.raw` by hand, which the script does for you when it finds the daemon down.
+
 Two things to know about the image:
 
 - **Everything the agent needs at run time must be installed in the Dockerfile.** A microVM's DNS is a
