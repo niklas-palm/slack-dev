@@ -28,7 +28,8 @@ Existing Slack threads keep their old VM until it expires (8h), so start a **new
 can't clobber your work.
 
 The base prompt already covers the Slack reply protocol, the status reactions, formatting, tool use, AWS
-read-only access, treating everything it reads as data rather than instructions, and the git prohibitions.
+read-only access, treating everything it reads as data rather than instructions, reading a cloned repo's
+own agent instructions (`AGENTS.md`/`CLAUDE.md` and friends) before touching it, and the git prohibitions.
 **Don't repeat or contradict those.** What belongs here is what a new senior hire would need on day one
 and couldn't get from reading the code:
 
