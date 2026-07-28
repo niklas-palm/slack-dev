@@ -216,6 +216,8 @@ Harden command execution before pointing this at untrusted users.
 │   └── scripts/          create-github-app · create-slack-app · invoke · cli
 ├── CLAUDE.md             ← house rules + commands: the entry point for a coding agent
 ├── .github/workflows/    ← THIS repo's own deploy (keyless OIDC). Delete it in a clone.
+├── agent.config.ci.json  ← the config THAT workflow deploys. Template's own repo + channel:
+│                            delete it with .github/, or replace it if you keep CI.
 ├── skills/               ← the create-slack-dev INSTALLER skill + install.mjs
 │                            — not the agent's own skills, which live in runtime/skills/
 ├── scripts/put-secrets.sh        manual/rotation path for any secret

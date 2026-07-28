@@ -397,6 +397,14 @@ Then in the repo: **Settings → Secrets and variables → Actions → Variables
 `AWS_DEPLOY_ROLE_ARN`, set to the printed ARN. It's a *variable*, not a secret — a role ARN isn't
 sensitive, and nothing can assume it without a signed OIDC token from this repo's `main`.
 
+**Replace `agent.config.ci.json` — it is NOT yours.** `agent.config.json` is gitignored (so a fork can't
+inherit someone's channel ids), which leaves CI with no config; this committed file fills that gap, and the
+workflow copies it into place. The version in this repo is a complete, valid config for **the template's
+own** agent — its repo, its Slack channel — so nothing about it looks wrong and no placeholder guard
+fires. Left as-is, your pipeline deploys an agent pointed at someone else's channel. Overwrite all four
+fields with yours, commit it, and keep in mind it's public: a channel id isn't a credential, but it is a
+real identifier anyone reading your repo can see.
+
 After that, a push to `main` runs `npm run check`, then `npm run image`, then `npm run deploy` — in that
 order, because the image is the agent and the stack only routes to it. Pull requests run the checks
 only; the role trusts `refs/heads/main` of this exact repo, so a PR (including from a fork) cannot
