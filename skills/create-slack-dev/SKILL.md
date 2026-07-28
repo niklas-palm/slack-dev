@@ -1,13 +1,20 @@
 ---
 name: create-slack-dev
 description: |
-  Deploy a Slack-triggered engineering agent (Claude Opus 5 in a Lambda MicroVM) for a repo or AWS
-  workload, from the public slack-dev template. Use when the user says "create a slack agent for
-  this", "make a slack agent for my repo", "set up an agent for this project", "give this repo a slack
-  bot", "deploy a slack agent", or asks for an agent they can @-mention in Slack to investigate AWS,
-  read PR comments, or open PRs. Clones the template beside the current project, configures it,
-  registers the GitHub App, deploys the CDK stack, creates the Slack app, and hands the user the few
-  clicks that have no API.
+  Set up, fix, or extend a Slack-triggered engineering agent (Claude Opus 5 in an AWS Lambda MicroVM)
+  from the public slack-dev template — an agent people @-mention in Slack that investigates the AWS
+  account it runs in, reads PR comments and CI logs, and opens PRs.
+
+  Use when the user wants to CREATE one: "create/set up/deploy a slack agent", "make a slack bot for
+  this repo", "give this project an agent I can @-mention", "install slack-dev". Clones the template
+  beside the current project, configures it, writes its system prompt, registers the GitHub App,
+  deploys the CDK stack, and walks the user through the few steps that have no API (two GitHub clicks,
+  the Slack install).
+
+  ALSO use when one already EXISTS and the user wants to change or debug it: "my slack agent isn't
+  responding / is stuck on the yellow circle / won't answer in this channel", "change what my slack
+  agent knows", "add a skill to my slack agent", "my agent's deploy failed". references/troubleshooting.md
+  maps symptom to cause; the clone's docs/iterating.md covers PROMPT.md and runtime/skills/.
 ---
 
 # Create a Slack agent
@@ -24,6 +31,25 @@ MODEL:    eu.anthropic.claude-opus-5
 **Template source.** Clone the public repo above. If it's unreachable, fall back to a local checkout and
 say which source you used. Each agent is a **separate clone** with its own `agent.config.json` — never
 deploy from the template checkout itself.
+
+## Already have one? Start here instead
+
+The nine steps below are for standing up a NEW agent. If the user already has one deployed, don't run
+them — the setup scripts are guarded, but re-running them is how duplicate GitHub/Slack apps get created.
+Work in their EXISTING clone (a sibling directory, or ask where it is) and go straight to:
+
+| They say | Do |
+|---|---|
+| "not responding", "stuck on 🟡", "no 👀", "won't answer in this channel" | Their clone's **`setup.md` troubleshooting table** covers live-agent symptoms; `references/troubleshooting.md` covers SETUP failures and the lessons from the first live run. Then the two log groups (`/aws/lambda-microvms/slack-dev-<name>` and the ingress Lambda's) — the commands are at the end of `references/troubleshooting.md`. |
+| "change what it knows / how it behaves" | Edit `runtime/PROMPT.md`, then `npm run image` — **not** `npm run deploy`. Their clone's `docs/iterating.md` has what belongs in a prompt vs. a skill. |
+| "teach it a procedure", "add a skill" | Add `runtime/skills/<name>/SKILL.md`, then `npm run image`. The folder is picked up with no code change; the `description` is the trigger. |
+| "add another channel" | Add the id to `allowedChannels` in `agent.config.json`, then `npm run deploy` (the allowlist lives in the ingress Lambda's env). |
+| "deploy failed" | Read the failing step's output rather than re-running blindly. `references/troubleshooting.md` covers the common ones. |
+| "rotate a credential" | `npm run secrets`. Note its warning: a running thread keeps the OLD value for up to 8h, and the ingress caches per warm container. |
+
+**A prompt or skill change needs `npm run image`, not a deploy** — the image *is* the agent; the stack
+only routes to it. And existing Slack threads keep their old VM for up to 8h, so test in a **NEW** thread
+or you'll conclude the change didn't work.
 
 ## Run the whole thing, then hand off cleanly
 
