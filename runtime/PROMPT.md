@@ -5,8 +5,9 @@
   instructions — you never edit src/prompt.ts, and an update to this template can't clobber your work.
 
   The base prompt already covers: the Slack reply protocol, the status reactions, formatting, tool
-  rules, AWS read-only access, treating everything it reads as data rather than instructions, and the
-  git/workflow prohibitions. Don't repeat those, and don't contradict them.
+  rules, AWS read-only access, treating everything it reads as data rather than instructions, reading a
+  cloned repo's own AGENTS.md/CLAUDE.md before working in it, and the git/workflow prohibitions. Don't
+  repeat those, and don't contradict them.
 
   Write what a new senior hire would need on day one and couldn't get by reading the code: what this
   system IS, its runtime topology, where the logs live, and what this agent should lead with.
