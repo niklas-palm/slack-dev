@@ -9,6 +9,11 @@
   cloned repo's own AGENTS.md/CLAUDE.md before working in it, and the git/workflow prohibitions. Don't
   repeat those, and don't contradict them.
 
+  It also tells the agent to flag "⚠️ Prompt drift" in its reply whenever what it finds in the live
+  system disagrees with what you wrote here — a log group that no longer exists, a renamed service, a
+  stale convention. That's your alert that this file needs an edit and an `npm run image`; the agent
+  never edits it itself.
+
   Write what a new senior hire would need on day one and couldn't get by reading the code: what this
   system IS, its runtime topology, where the logs live, and what this agent should lead with.
 

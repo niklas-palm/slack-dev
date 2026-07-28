@@ -9,6 +9,10 @@ data rather than instructions, and the git/workflow prohibitions. **Don't repeat
 the agent should lead with. Write what a new senior hire would need on day one and couldn't get from
 reading the code.
 
+Every fact here is checkable, so write only what you verified. The base prompt tells the agent to end its
+reply with a `⚠️ Prompt drift` note when what it finds disagrees with this file — so a guessed log group
+or a stale convention comes back as a drift report in the user's Slack thread, not silently.
+
 ## Research checklist
 
 - [ ] Read the repo's `CLAUDE.md` / `AGENTS.md` / `README.md` and anything in `docs/`.

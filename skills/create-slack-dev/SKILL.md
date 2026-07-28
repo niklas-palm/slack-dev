@@ -24,13 +24,43 @@ and reasons about a repo, reads PR comments and CI logs, and opens PRs — reply
 
 ```
 TEMPLATE: https://github.com/niklas-palm/slack-dev
-REGION:   eu-west-1         (the only Lambda MicroVM region; Opus 5 is ACTIVE there too)
+REGION:   eu-west-1         (default; us-east-1 is the only other option — see below)
 MODEL:    eu.anthropic.claude-opus-5
 ```
 
 **Template source.** Clone the public repo above. If it's unreachable, fall back to a local checkout and
 say which source you used. Each agent is a **separate clone** with its own `agent.config.json` — never
 deploy from the template checkout itself.
+
+## Region: only two are possible
+
+**Lambda MicroVMs exists in exactly two regions today: `eu-west-1` (the EU one) and `us-east-1` (the US
+one).** Nowhere else — every other region fails with `AccessDeniedException` on
+`ListManagedMicrovmImages`, and it fails *minutes into the image build*, after the S3 bucket and IAM
+build role already exist. So never "helpfully" deploy into the user's usual region.
+
+The template ships pinned to `eu-west-1`, and the stack throws if you try to deploy it elsewhere — that
+guard is deliberate, not a bug to route around. **If the user's workload and team are in the US, ask
+whether they want `us-east-1`, and switch the pins properly before step 6:**
+
+| Change | To |
+|---|---|
+| `infra/lib/config.ts` → `REGION` | `us-east-1` |
+| `runtime/src/config.ts` → `REGION` | `us-east-1` |
+| `runtime/src/config.ts` → `MODEL_ID` | `us.anthropic.claude-opus-5` |
+| `infra/microvm/build.sh` → `REGION` | `us-east-1` |
+| `scripts/put-secrets.sh`, `scripts/setup-github-oidc.sh` → `REGION` | `us-east-1` |
+| `infra/test/stack.test.ts` — the guard test pins the region by name | `us-east-1` (and its counter-example to a non-MicroVM region) |
+| every `--region eu-west-1` in commands you run, and in `setup.md` | `us-east-1` |
+
+**The model id prefix is regional, and this is the easy one to miss:** `eu.anthropic.claude-opus-5` does
+not resolve in `us-east-1` — it's `us.anthropic.claude-opus-5` there (verified: both inference profiles
+exist, each only in its own region). A region switch that forgets `MODEL_ID` deploys fine and then every
+turn fails at the first model call.
+
+Then confirm the model is enabled in the new region (the step-2 Bedrock command with the region swapped)
+and re-run `npm run check`. **Don't half-migrate** — a stack in one region with an image built in the
+other fails late and confusingly. If you're not switching, say nothing and stay in `eu-west-1`.
 
 ## Already have one? Start here instead
 
@@ -81,6 +111,25 @@ the environment, so the user can keep them in their own shell. Step 7 makes this
    broken and a permissions mistake. If in a git repo: `git remote get-url origin`, then **confirm**.
 2. **`name`** — the agent's slug (lowercase, digits, hyphens). Derives the stack name, SSM prefix, and
    microVM image name, so several agents can share an account. Also the @handle people type.
+
+   **Check the name is available on GitHub before you settle on it.** The GitHub App is named after
+   `displayName`, and App names are unique across *all* of GitHub — so an obvious name like `dev-agent`
+   or `platform-bot` is usually taken. Discovering that at step 5 costs a re-run and two more clicks
+   each time, so check the candidates *here*, while you're still choosing:
+
+   ```bash
+   for n in <candidate> <candidate-2> <candidate-3>; do
+     slug="$(printf '%s' "$n" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]\+/-/g; s/^-*//; s/-*$//')"
+     printf '%-28s %s\n' "$n" \
+       "$(curl -so /dev/null -w '%{http_code}' "https://github.com/apps/${slug}" \
+          | sed 's/^404$/AVAILABLE/; s/^2[0-9][0-9]$/TAKEN/')"
+   done
+   ```
+
+   `404` means no App owns that slug → available. Anything `2xx` means taken. Offer the user the
+   available candidates and let them choose — the name is the bot's identity on every PR, so **never
+   pick or silently mangle it for them.** Distinctive names (product or team prefix, e.g.
+   `acme-checkout-agent`) are far likelier to be free than generic ones.
 3. **`allowedChannels`** — the Slack channel **ids** (`C0123ABCD`) it may answer in. **Always ask.**
    Empty means it answers in *any* channel it's invited to — in a large workspace, anyone who can
    `/invite` it could direct an agent holding repo push credentials. Tell them how to find an id: in
@@ -110,6 +159,7 @@ aws lambda-microvms help >/dev/null && echo "aws cli new enough"
 env -u AWS_PROFILE aws bedrock list-inference-profiles --region eu-west-1 \
   --query "inferenceProfileSummaries[?inferenceProfileId=='eu.anthropic.claude-opus-5'].status" --output text
 # → ACTIVE. Anything else: the user must enable Opus 5 in the Bedrock console for eu-west-1.
+# Deploying in us-east-1 instead? Swap BOTH the region and the prefix: 'us.anthropic.claude-opus-5'.
 env -u AWS_PROFILE aws cloudformation describe-stacks --stack-name CDKToolkit \
   --region eu-west-1 --query 'Stacks[0].StackStatus' --output text
 # Not found → bootstrap once, BEFORE deploying:
@@ -174,6 +224,10 @@ is, its runtime topology, where its logs live, and what the agent should lead wi
 Research it properly: read `references/prompt-research.md` for the checklist, the commands that inventory
 real infrastructure, and the two mistakes that make an agent useless in practice.
 
+Get the facts right rather than guessing at them: when the agent later finds that a log group, resource
+or convention you wrote here doesn't match the live system, it flags `⚠️ Prompt drift` in its Slack reply
+so the user knows to fix this file and re-run `npm run image`.
+
 ## Step 5 — Register the GitHub App *(user clicks twice)*
 
 ```bash
@@ -190,9 +244,10 @@ Tell the user what to expect *before* running it — it opens their browser and 
 check `node -v` — the build reads the config with node, so a broken node install surfaces as a config
 error. (It used to read it with python3, which macOS no longer bundles, producing exactly that confusion.)
 
-**If it exits with "name is already taken":** App names are unique across all of GitHub. Ask what they'd
-like instead — it's display-only and appears on PRs as `name[bot]` — then re-run with
-`-- --app-name <their choice>`. **Don't pick one for them**; it's the bot's identity on every PR.
+**If it exits with "name is already taken":** you skipped the availability check in step 1 — run it now
+for a couple of candidates, ask what they'd like instead (it's display-only and appears on PRs as
+`name[bot]`), then re-run with `-- --app-name <their choice>`. **Don't pick one for them**; it's the bot's
+identity on every PR.
 
 The App is scoped to **propose, never land**. If asked, `references/permissions.md` explains each grant.
 

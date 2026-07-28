@@ -119,7 +119,9 @@ Slack @mention → API Gateway → ingress Lambda        (verify HMAC · channel
   coding agent reads to set all this up. Installed with `npx github:niklas-palm/slack-dev`.
 - `infra/lib/stack.ts` — the whole stack. `infra/lambda/slack-events/` — the ingress and the microVM
   client. `infra/microvm/build.sh` — the image build (not CDK: CloudFormation has no resource type).
-- **Region is `eu-west-1`**, the only one Lambda MicroVMs exists in. Opus 5 is ACTIVE there too.
+- **Region is `eu-west-1`**, where this template is pinned. Lambda MicroVMs exists only in `eu-west-1`
+  and `us-east-1`; Opus 5 is ACTIVE in both, but the inference-profile prefix is regional (`eu.` vs
+  `us.`), so a region move must change `MODEL_ID` too. See [docs/lambda-microvms.md](./docs/lambda-microvms.md).
 
 ## Conventions
 

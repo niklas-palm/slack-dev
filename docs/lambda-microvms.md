@@ -24,11 +24,18 @@ dependencies, warming a daemon, starting a server) should happen at *build* time
 
 ## Region
 
-**`eu-west-1` only** (verified: `eu-north-1` returns `AccessDeniedException` for
-`ListManagedMicrovmImages`). This is why the whole stack lives in eu-west-1. Claude Opus 5 is `ACTIVE`
-there, so the model and the compute share one region.
+**Two regions only: `eu-west-1` and `us-east-1`** (verified: `eu-north-1` returns
+`AccessDeniedException` for `ListManagedMicrovmImages`). This template is **pinned to `eu-west-1`**,
+where Claude Opus 5 is `ACTIVE`, so the model and the compute share one region.
 
-Base image: `arn:aws:lambda:eu-west-1:aws:microvm-image:al2023-1` (Amazon Linux 2023, the only managed
+Running in `us-east-1` instead is a handful of pinned constants, not a config knob: `REGION` in
+`infra/lib/config.ts`, `runtime/src/config.ts`, `infra/microvm/build.sh` and `scripts/*.sh`, the region
+guard's test in `infra/test/stack.test.ts` — **and `MODEL_ID`, because the inference-profile prefix is
+regional** (`us.anthropic.claude-opus-5`, not `eu.`). Forgetting that last one deploys cleanly and then
+fails at the first model call. Don't run a mixed pair: stack in one region, image built in the other
+fails late and confusingly.
+
+Base image: `arn:aws:lambda:<region>:aws:microvm-image:al2023-1` (Amazon Linux 2023, the only managed
 base offered).
 
 ## Docker inside a microVM — the requirement and the trap
