@@ -12,10 +12,10 @@ export const REPO_ROOT = join(
   "..",
 );
 
-/** Every resource lives here. MicroVMs exists in eu-west-1 and us-east-1 only, and this deployment is
- *  pinned to eu-west-1, where Claude Opus 5 is ACTIVE too — so compute and model share one region.
- *  Moving to us-east-1 means changing this AND runtime MODEL_ID (the `eu.`/`us.` inference-profile
- *  prefix is regional). See docs/lambda-microvms.md. */
+/** Every resource lives here. This deployment is pinned to eu-west-1, where Opus 5 is ACTIVE, so
+ *  compute and model share one region. Moving region means changing this AND runtime MODEL_ID (the
+ *  `eu.`/`us.` inference-profile prefix is regional), and confirming MicroVMs is available there.
+ *  See docs/lambda-microvms.md. */
 export const REGION = "eu-west-1";
 
 export interface AgentConfig {

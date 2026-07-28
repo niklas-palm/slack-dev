@@ -406,10 +406,10 @@ describe("the stack", () => {
     expect(Object.keys(outputs)).toContain("MicroVmRoleArn");
   });
 
-  // MicroVMs exists in eu-west-1 and us-east-1; this deployment is PINNED to eu-west-1, and a
-  // half-migration (stack in one region, image built in the other) fails late and confusingly. So the
-  // guard fires even for the other MicroVM region — moving means changing the pins, not the CLI flag.
-  it("refuses to deploy outside its pinned region, even in the other MicroVM region", () => {
+  // This deployment is PINNED to eu-west-1, and a half-migration (stack in one region, image built in
+  // the other) fails late and confusingly. So the guard fires for ANY other region, including one that
+  // does support MicroVMs — moving means changing the pins, not passing a different CLI flag.
+  it("refuses to deploy outside its pinned region, even one that supports MicroVMs", () => {
     const agent = loadConfig(configRoot(VALID));
     expect(
       () =>

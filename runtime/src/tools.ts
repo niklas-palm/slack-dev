@@ -472,7 +472,9 @@ Available in the image: git, gh, curl, jq, ripgrep, openssl, node, npm, python3.
       };
       if (r.timedOut) {
         result.error_summary = `timed out after ${seconds}s`;
-        result.hint = `raise \`timeout\` (max 900) for a long build or test suite, or start it in the background and poll: \`(nohup <cmd> > /tmp/out.log 2>&1 &)\` then read the log on a later call.`;
+        // No "background it with nohup" advice here, however tempting: a grandchild that escapes the
+        // process group is the exact case runChild's `exit`-not-`close` comment above exists for.
+        result.hint = `raise \`timeout\` (max 900) — a build or a full test suite often needs it. If it still won't fit, run the slow part alone rather than chaining commands.`;
       }
       else if (r.code !== 0) result.error_summary = clip(r.stderr.trim() || `exit code ${r.code}`, 500);
       return result;
@@ -503,7 +505,6 @@ print() whatever you need to see; no state persists between calls.`,
       const seconds = Math.min(Math.max(timeout, 1), 900);
       const r = await runChild("python3", [script], { timeoutMs: seconds * 1000 });
       // A timeout with no guidance made one agent tell the person "one of my searches hung" and move on.
-      // The usual cause is an unbounded CloudWatch query, which has a fix the model can apply itself.
       if (r.timedOut)
         return {
           success: false,
