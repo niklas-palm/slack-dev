@@ -119,9 +119,9 @@ Slack @mention → API Gateway → ingress Lambda        (verify HMAC · channel
   coding agent reads to set all this up. Installed with `npx github:niklas-palm/slack-dev`.
 - `infra/lib/stack.ts` — the whole stack. `infra/lambda/slack-events/` — the ingress and the microVM
   client. `infra/microvm/build.sh` — the image build (not CDK: CloudFormation has no resource type).
-- **Region is `eu-west-1`**, where this template is pinned. Lambda MicroVMs exists only in `eu-west-1`
-  and `us-east-1`; Opus 5 is ACTIVE in both, but the inference-profile prefix is regional (`eu.` vs
-  `us.`), so a region move must change `MODEL_ID` too. See [docs/lambda-microvms.md](./docs/lambda-microvms.md).
+- **Region is `eu-west-1`**, where this template is pinned and Opus 5 is ACTIVE. Lambda MicroVMs is not
+  in every region, and the inference-profile prefix is regional (`eu.` vs `us.`), so a region move must
+  change `MODEL_ID` too — and verify availability first. See [docs/lambda-microvms.md](./docs/lambda-microvms.md).
 
 ## Conventions
 
@@ -145,7 +145,10 @@ These are properties of the system, not preferences — don't weaken one without
 - **It only answers in approved channels**, enforced in the ingress before any reaction or model call.
 - **Everything the agent reads is data, not instructions** — repo files, PR bodies, CI logs, `curl`
   output. Pinned by tests.
-- **A turn always ends with a terminal reaction.** A reaction that lies is worse than none.
+- **A turn always ATTEMPTS a terminal reaction**, and never claims one Slack refused. If Slack refuses
+  permanently (a deleted trigger message → `message_not_found`), the honest result is a reply with NO
+  colour plus a ⚠️ note — not a colour we didn't set. A reaction that lies is worse than none, so the
+  tools invite one retry and then stop (`statusFailed` in `slack-tools.ts`) rather than looping.
 - **A refusal must be a non-2xx.** The ingress reads the HTTP status and nothing else, so a rejection
   wrapped in a 200 is silent: the mention keeps a lone 👀 and nobody is told. `runtime/src/invoke-gate.ts`
   holds the rules (empty prompt → 400, no bot token → 503) — extracted from `server.ts` precisely so they

@@ -24,7 +24,7 @@ and reasons about a repo, reads PR comments and CI logs, and opens PRs — reply
 
 ```
 TEMPLATE: https://github.com/niklas-palm/slack-dev
-REGION:   eu-west-1         (default; us-east-1 is the only other option — see below)
+REGION:   eu-west-1         (pinned default; check availability before moving — see below)
 MODEL:    eu.anthropic.claude-opus-5
 ```
 
@@ -32,16 +32,26 @@ MODEL:    eu.anthropic.claude-opus-5
 say which source you used. Each agent is a **separate clone** with its own `agent.config.json` — never
 deploy from the template checkout itself.
 
-## Region: only two are possible
+## Region: check before you move, and move the pins together
 
-**Lambda MicroVMs exists in exactly two regions today: `eu-west-1` (the EU one) and `us-east-1` (the US
-one).** Nowhere else — every other region fails with `AccessDeniedException` on
-`ListManagedMicrovmImages`, and it fails *minutes into the image build*, after the S3 bucket and IAM
-build role already exist. So never "helpfully" deploy into the user's usual region.
+**Lambda MicroVMs is not in every region**, and an unsupported one fails with `AccessDeniedException` on
+`ListManagedMicrovmImages` *minutes into the image build*, after the S3 bucket and IAM build role already
+exist. So never "helpfully" deploy into the user's usual region — ASK the API first:
 
-The template ships pinned to `eu-west-1`, and the stack throws if you try to deploy it elsewhere — that
-guard is deliberate, not a bug to route around. **If the user's workload and team are in the US, ask
-whether they want `us-east-1`, and switch the pins properly before step 6:**
+```bash
+# the real probe. `list-microvm-images` is NOT one: it returns {"items": []} whether or not the region
+# supports MicroVMs, so it reads like a clean yes.
+env -u AWS_PROFILE aws lambda-microvms list-managed-microvm-images --region <r>
+```
+
+Don't write a region list into this skill. One was, generalised from a single negative probe, and it was
+wrong — it named two regions when more are supported, which would have made you refuse a perfectly good
+install. The API is the only current answer.
+
+The template ships pinned to `eu-west-1` (where Opus 5 is `ACTIVE`), and the stack throws if you deploy
+it elsewhere — that guard is deliberate, not a bug to route around. **If the user's workload and team are
+elsewhere, confirm MicroVMs AND the model are available there, then switch the pins properly before
+step 6** (example below uses `us-east-1`):
 
 | Change | To |
 |---|---|
@@ -50,12 +60,12 @@ whether they want `us-east-1`, and switch the pins properly before step 6:**
 | `runtime/src/config.ts` → `MODEL_ID` | `us.anthropic.claude-opus-5` |
 | `infra/microvm/build.sh` → `REGION` | `us-east-1` |
 | `scripts/put-secrets.sh`, `scripts/setup-github-oidc.sh` → `REGION` | `us-east-1` |
-| `infra/test/stack.test.ts` — the guard test pins the region by name | `us-east-1` (and its counter-example to a non-MicroVM region) |
+| `infra/test/stack.test.ts` — the guard test pins the region by name | the new region (and its counter-example) |
 | every `--region eu-west-1` in commands you run, and in `setup.md` | `us-east-1` |
 
 **The model id prefix is regional, and this is the easy one to miss:** `eu.anthropic.claude-opus-5` does
-not resolve in `us-east-1` — it's `us.anthropic.claude-opus-5` there (verified: both inference profiles
-exist, each only in its own region). A region switch that forgets `MODEL_ID` deploys fine and then every
+not resolve in a US region — it's `us.anthropic.claude-opus-5` there (verified: each profile resolves
+only in its own region). Check the prefix your target region actually offers rather than assuming `us.`. A region switch that forgets `MODEL_ID` deploys fine and then every
 turn fails at the first model call.
 
 Then confirm the model is enabled in the new region (the step-2 Bedrock command with the region swapped)
@@ -118,15 +128,19 @@ the environment, so the user can keep them in their own shell. Step 7 makes this
    each time, so check the candidates *here*, while you're still choosing:
 
    ```bash
+   # `sed -E`: BSD/macOS sed reads GNU's `\+` as a literal plus, so a basic-regex version left the
+   # spaces in and silently probed a URL containing them.
+   # `curl -L`: an existing App can answer 301 (github.com/apps/dependabot does), so only 404 is a
+   # reliable "free" — treat everything else as taken rather than looking for 2xx.
    for n in <candidate> <candidate-2> <candidate-3>; do
-     slug="$(printf '%s' "$n" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]\+/-/g; s/^-*//; s/-*$//')"
-     printf '%-28s %s\n' "$n" \
-       "$(curl -so /dev/null -w '%{http_code}' "https://github.com/apps/${slug}" \
-          | sed 's/^404$/AVAILABLE/; s/^2[0-9][0-9]$/TAKEN/')"
+     slug="$(printf '%s' "$n" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9-]+/-/g; s/^-+//; s/-+$//')"
+     code="$(curl -sLo /dev/null -w '%{http_code}' "https://github.com/apps/${slug}")"
+     [ "$code" = 404 ] && verdict=AVAILABLE || verdict="TAKEN ($code)"
+     printf '%-28s %-14s %s\n' "$n" "$slug" "$verdict"
    done
    ```
 
-   `404` means no App owns that slug → available. Anything `2xx` means taken. Offer the user the
+   Only `404` means the slug is free; anything else means taken. Offer the user the
    available candidates and let them choose — the name is the bot's identity on every PR, so **never
    pick or silently mangle it for them.** Distinctive names (product or team prefix, e.g.
    `acme-checkout-agent`) are far likelier to be free than generic ones.

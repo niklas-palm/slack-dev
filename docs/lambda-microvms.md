@@ -24,16 +24,37 @@ dependencies, warming a daemon, starting a server) should happen at *build* time
 
 ## Region
 
-**Two regions only: `eu-west-1` and `us-east-1`** (verified: `eu-north-1` returns
-`AccessDeniedException` for `ListManagedMicrovmImages`). This template is **pinned to `eu-west-1`**,
-where Claude Opus 5 is `ACTIVE`, so the model and the compute share one region.
+This template is **pinned to `eu-west-1`**, where Claude Opus 5 is `ACTIVE`, so the model and the
+compute share one region.
 
-Running in `us-east-1` instead is a handful of pinned constants, not a config knob: `REGION` in
-`infra/lib/config.ts`, `runtime/src/config.ts`, `infra/microvm/build.sh` and `scripts/*.sh`, the region
-guard's test in `infra/test/stack.test.ts` — **and `MODEL_ID`, because the inference-profile prefix is
-regional** (`us.anthropic.claude-opus-5`, not `eu.`). Forgetting that last one deploys cleanly and then
-fails at the first model call. Don't run a mixed pair: stack in one region, image built in the other
-fails late and confusingly.
+**MicroVMs is not in every region — ASK the API, don't trust a list.** Any list written down here goes
+stale as AWS adds regions, and an enumerated one was wrong within weeks of being written: it had been
+generalised from a single negative probe (`eu-north-1` → `AccessDeniedException`), which cannot establish
+what IS supported. Check the region you want:
+
+```bash
+# the real probe. `list-microvm-images` is NOT one — it returns {"items": []} in supported and
+# unsupported regions alike, so it looks like a clean answer while telling you nothing.
+aws lambda-microvms list-managed-microvm-images --region <r>
+```
+
+Moving is a set of pinned constants, not a config knob. **Find them with `grep`, not from a list here** —
+a written list is stale the moment someone adds a pin, and reads exhaustive while it isn't:
+
+```bash
+grep -rn "eu-west-1\|eu\.anthropic" --include='*.ts' --include='*.sh' --include='*.yml' \
+  --exclude-dir=node_modules --exclude-dir=cdk.out .
+```
+
+Two that are easy to miss even so: **`.github/workflows/deploy.yml`'s `aws-region`** (CI would deploy
+into the old region, or trip the stack's guard), and **`MODEL_ID`, because the inference-profile prefix is
+regional** (`us.anthropic.claude-opus-5` in a US region, not `eu.`) — forgetting that one deploys cleanly
+and then fails at the first model call. Two region-pinned tests also assert the value
+(`infra/test/stack.test.ts`: the deploy guard, and a `kms:ViaService` ARN).
+
+Confirm your model is `ACTIVE` in the new region too — the compute being available does not imply the
+model is. Don't run a mixed pair: stack in one region, image built in the other fails late and
+confusingly.
 
 Base image: `arn:aws:lambda:<region>:aws:microvm-image:al2023-1` (Amazon Linux 2023, the only managed
 base offered).

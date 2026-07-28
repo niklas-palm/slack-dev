@@ -76,7 +76,7 @@ jobs:
       - uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: eu-west-1 # the only region Lambda MicroVMs is available in
+          aws-region: eu-west-1 # keep in sync with infra/lib/config.ts REGION (the stack guards on it)
 
       # agent.config.json is gitignored so a FORK never inherits someone's channel ids or repo. This
       # repo deploys ITSELF, so its own config is committed separately and copied into place — visible

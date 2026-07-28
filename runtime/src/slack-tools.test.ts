@@ -242,9 +242,28 @@ describe("set_thread_status", () => {
       hints.push(r.hint!);
     }
     expect(hints[0]).toMatch(/again/);
-    // By the second failure it must stop asking, or the model keeps burning the turn on a colour.
-    expect(hints[1]).toContain("do NOT retry");
-    expect(hints[2]).toContain("do NOT retry");
+    // The invariant, asserted without coupling to the wording: from the second failure on, the hint must
+    // stop inviting a retry. Otherwise the model keeps burning the turn on a colour it can never set.
+    expect(hints[1]).not.toMatch(/again/);
+    expect(hints[2]).not.toMatch(/again/);
+  });
+
+  // A transient blip early in a turn must not disarm the retry the CLOSING status is entitled to. The
+  // set-before-reply path makes this reachable: it tells the model to set the status again, so a single
+  // `ratelimited` used to leave the counter armed and the real close got "do NOT retry" on attempt #1 —
+  // ending the turn with status null and a spurious "I may not have finished everything".
+  it("forgives an earlier failure once a status has landed", async () => {
+    const t = turn();
+    t.replied = true;
+    responses = [{ ok: true }, { ok: true }, { ok: true }, { ok: false, error: "ratelimited" }];
+    expect(((await call("set_thread_status", { status: "done" }, t)) as Record<string, unknown>).success).toBe(false);
+
+    responses = []; // everything succeeds
+    expect(((await call("set_thread_status", { status: "done" }, t)) as Record<string, unknown>).success).toBe(true);
+
+    responses = [{ ok: true }, { ok: true }, { ok: true }, { ok: false, error: "ratelimited" }];
+    const again = (await call("set_thread_status", { status: "done" }, t)) as Record<string, string>;
+    expect(again.hint, "a fresh failure after a success is attempt #1, not #2").toMatch(/again/);
   });
 
   it("never touches the 👀 acknowledgement", async () => {

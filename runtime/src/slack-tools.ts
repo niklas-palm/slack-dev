@@ -56,8 +56,8 @@ export interface SlackTurn {
   target: SlackTarget;
   replied: boolean;
   status: "working" | "waiting" | "done" | "failed" | null;
-  /** Failed `set_thread_status` attempts, so we stop telling the model to retry a permanent refusal. */
-  statusAttempts?: number;
+  /** A `set_thread_status` call has already failed, so we stop inviting a retry that can't succeed. */
+  statusFailed: boolean;
   /** Dedupes identical posts within one turn, so a retrying model can't double-post. */
   posted: Map<string, string>;
   /** Serializes every state mutation for this turn. Never awaited from inside a locked section. */
@@ -104,6 +104,7 @@ export function newSlackTurn(target: SlackTarget): SlackTurn {
     posted: new Map(),
     deliveredThisBatch: 0,
     failedPosts: 0,
+    statusFailed: false,
     lock: Promise.resolve(),
     pending: new Map(),
   };
@@ -325,22 +326,26 @@ others. The 👀 acknowledgement stays. The runtime already set 🟡 working, so
       // thread is closed while it still shows 🟡 — a reaction that lies, which this protocol exists to
       // prevent. The sweep and this write share a critical section, so they can't describe different runs.
       if (!ok) {
-        // Count the attempts, because "try again" is only useful for a TRANSIENT refusal. A permanent one
-        // (the message was deleted, or this VM is serving a session id whose message never existed) fails
-        // identically for ever — and the model dutifully obeyed the hint, so one turn called this three
-        // times in a row on a `message_not_found`. After a couple of tries, stop asking: the reply itself
-        // already landed, and a missing colour is not worth more of the turn.
-        turn.statusAttempts = (turn.statusAttempts ?? 0) + 1;
-        const giveUp = turn.statusAttempts >= 2;
+        // "try again" only helps a TRANSIENT refusal. A permanent one (the message was deleted, or this VM
+        // is serving a session id whose message never existed) fails identically for ever — and the model
+        // dutifully obeyed the hint, so one turn called this three times on a `message_not_found`. Invite
+        // one retry, then stop asking: the reply already landed, and the runtime marks the thread at the
+        // end of the turn regardless, so a missing colour is not worth more of it.
+        const hint = turn.statusFailed
+          ? "do NOT retry — this failure is not transient. The runtime marks the thread when the turn ends. Carry on."
+          : "try set_thread_status again, once. If it fails the same way, it is not transient.";
+        turn.statusFailed = true;
         return {
           success: false,
           status,
           error: "Slack did not accept the reaction, so the thread still shows 🟡",
-          hint: giveUp
-            ? "do NOT retry — this failure is not transient. The runtime will mark the thread when the turn ends. Carry on, or finish your answer."
-            : "try set_thread_status again — once. If it fails the same way, it is not transient.",
+          hint,
         };
       }
+      // Reset: a transient failure earlier in the turn must not make the FIRST failure of a later,
+      // genuinely-retryable sequence look like the second. (Reachable via the set-before-reply path
+      // below, which tells the model to set the status again.)
+      turn.statusFailed = false;
       turn.status = status;
       // A status without a reply is the silent-success trap; tell the model plainly so it can fix it.
       if (!turn.replied) {
@@ -365,8 +370,8 @@ Posts the question, sets the ❓ waiting reaction, and finishes the turn — the
 to continue. Use this when a request is genuinely ambiguous or a decision is theirs to make, not to
 confirm routine steps.
 
-If Slack rejects the reaction this returns success:false and the turn does NOT end — call it again, or
-answer and use set_thread_status if you'd rather finish.`,
+If Slack rejects the ❓ this returns success:false and the turn does NOT end. The question itself already
+posted, so do NOT call this again — calling it again re-posts the question. Read the hint.`,
   inputSchema: z.object({
     question: z.string().min(1).describe("The question, in Slack mrkdwn."),
   }),
@@ -395,14 +400,18 @@ answer and use set_thread_status if you'd rather finish.`,
     return withTurn(turn, async () => {
       const ok = await setThreadStatus(turn.target, "waiting");
       if (!ok) {
+        // The QUESTION landed — only the ❓ didn't. So never say "call ask_user again": that re-posts the
+        // question (dedupe keys on the text, so a reworded one gets through), and on a permanent refusal
+        // it loops for ever. Same lesson as set_thread_status above: our hint drove the loop.
+        turn.statusFailed = true;
         return {
           success: false,
           ts: r.ts,
-          error:
-            "the question posted, but Slack did not accept the waiting reaction",
-          hint: "call ask_user again to set it, or set_thread_status if you meant to finish",
+          error: "the question posted, but Slack did not accept the waiting reaction",
+          hint: "do NOT call ask_user again — the question is already in the thread and would be re-posted. Stop here; the person has been asked.",
         };
       }
+      turn.statusFailed = false;
       turn.status = "waiting";
       return { success: true, ts: r.ts, duplicate: r.duplicate, waiting: true };
     });

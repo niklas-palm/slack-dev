@@ -60,7 +60,7 @@ export class SlackDevStack extends Stack {
 
     if (this.region !== REGION) {
       throw new Error(
-        `This stack must deploy in ${REGION} (got ${this.region}) — this deployment is pinned there. Lambda MicroVMs exists only in eu-west-1 and us-east-1; changing region means changing the pinned constants, MODEL_ID included.`,
+        `This stack must deploy in ${REGION} (got ${this.region}) — this deployment is pinned there. Lambda MicroVMs is not in every region, and moving means changing the pinned constants (MODEL_ID included), not the CLI flag. See docs/lambda-microvms.md.`,
       );
     }
 

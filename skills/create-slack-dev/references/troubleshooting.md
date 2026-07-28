@@ -21,7 +21,7 @@ point the user there.
 
 | Symptom | Cause and fix |
 |---|---|
-| `name is already taken` | App names are unique across all of GitHub, so generic ones usually are. Check candidates before asking the user to click anything: `curl -so /dev/null -w '%{http_code}' https://github.com/apps/<slug>` → `404` is available, `2xx` is taken. **Ask the user** which free name they want — it's the bot's identity on PRs — then re-run with `-- --app-name <choice>`. |
+| `name is already taken` | App names are unique across all of GitHub, so generic ones usually are. Check candidates before asking the user to click anything: `curl -sLo /dev/null -w '%{http_code}' https://github.com/apps/<slug>` → only `404` is available, anything else is taken (an existing App may answer 301, so `-L` matters and looking for `2xx` misses it). **Ask the user** which free name they want — it's the bot's identity on PRs — then re-run with `-- --app-name <choice>`. |
 | `gh-app-id already exists` | An App is already registered for this agent. Re-running is blocked so you can't orphan one. Delete that SSM parameter only if the user confirms they want a new App. |
 | `"url" wasn't supplied` | A malformed manifest — GitHub reads `hook_attributes` as a webhook declaration whose `url` is required. The shipped manifest omits it entirely; don't add it back. |
 | The script exits after creating the App but before storing something | **Don't re-run** — it would create a second App. The script prints the exact `aws ssm put-parameter` command; follow that, or use `npm run secrets`. |
@@ -46,7 +46,7 @@ point the user there.
 | The agent never answers, and the Lambda logs show no `[route]` line | The image ARN isn't in SSM — run `npm run image`. The stack routes to an image it doesn't build. |
 | `already exists` on a named resource | Another agent used the same `name` in this account, or a previous stack wasn't cleaned up. Pick a different `name`. |
 | `npm run invoke` says no image ARN | `npm run image` hasn't run for this agent, or it failed. It publishes the ARN both scripts read. |
-| `refuses to deploy outside eu-west-1` | Intentional. MicroVMs exists only in `eu-west-1` and `us-east-1`, and the template is pinned to `eu-west-1` — don't override the guard from the CLI. To actually run in `us-east-1`, change the pinned constants (SKILL.md "Region: only two are possible"), `MODEL_ID` included. |
+| `refuses to deploy outside eu-west-1` | Intentional — the template is pinned there; don't override the guard from the CLI. To actually run elsewhere, confirm MicroVMs and the model are available in that region, then change the pinned constants (SKILL.md "Region: check before you move"), `MODEL_ID` included. |
 | Deploy succeeds but `npm run invoke` gets nothing | Check the microVM log group for a boot failure. `grep ALERT` catches a missing `SLACK_BOT_TOKEN`, which the agent cannot report itself. A VM that terminates within a second of launch usually means its execution role was just created — IAM propagation, so retry. |
 
 ## After handoff, from the first live run

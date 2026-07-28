@@ -52,7 +52,7 @@ npm install
 ```
 
 Claude Opus 5 must be enabled in Bedrock in `eu-west-1`, the region this template is pinned to. (Lambda
-MicroVMs exists only in `eu-west-1` and `us-east-1`; running in `us-east-1` means changing the pinned
+MicroVMs is not available in every region; running elsewhere means changing the pinned
 constants — see [docs/lambda-microvms.md](./docs/lambda-microvms.md).) Check:
 
 ```bash
@@ -147,8 +147,8 @@ access. Everything else is automated.
   taken rather than picking a variant for you — it's the identity on every PR the agent opens, so it
   should be your choice. Re-run with the name you want: `npm run github-app -- --app-name <name>`. It's
   display-only and needn't match `agent.config.json`; it shows on PRs as `name[bot]`. To test a name
-  without running anything: `curl -so /dev/null -w '%{http_code}\n' https://github.com/apps/<slug>` —
-  `404` is free, `200` is taken.
+  without running anything: `curl -sLo /dev/null -w '%{http_code}\n' https://github.com/apps/<slug>` —
+  only `404` is free; anything else is taken (some existing Apps answer 301, hence `-L`).
 - **Re-running is blocked** while `gh-app-id` exists, so you can't silently orphan an App. Delete that
   parameter first if you really want a new one.
 - **The permissions it requests**, and why each: `contents: write` (clone, push branches),
@@ -297,7 +297,8 @@ auto-closing an unconfirmed turn as green would paint unfinished work as finishe
 a real failure (the agent says what went wrong) *or* an unconfirmed finish (the runtime's ⚠️ note says so).
 
 If you ever see a thread stuck on 🟡, that's a bug — the runtime closes out with a terminal 🟢/🔴 even if
-the agent crashes. Check the runtime logs. A reply or question with *no* colour at all is different:
+the agent crashes. (It *attempts* that; if Slack refuses the reaction outright the honest result is a
+reply with no colour at all, never a colour we didn't manage to set.) Check the runtime logs. A reply or question with *no* colour at all is different:
 Slack refused the reaction (`grep slack_status_warning`).
 
 Then try a change:
@@ -354,7 +355,8 @@ env -u AWS_PROFILE aws logs tail "/aws/lambda/$FN" --region eu-west-1 --since 15
 | No 👀 at all | **First: is the channel in `allowedChannels`?** An unapproved channel is dropped silently by design — `grep "channel not allowed"` in the Lambda logs, which prints the id to add. Otherwise: the bot isn't in the channel, or the bot token / `reactions:write` scope is wrong |
 | `missing_scope` in a tool result | You changed the manifest's scopes — reinstall the app (**OAuth & Permissions → Reinstall**) and re-copy the bot token |
 | 👀 but no 🟡 | The Lambda logs say whether it reached the VM at all (`grep '\[route\]'`). If it did, the agent failed to start — check the microVM log group |
-| Stuck on 🟡 | Shouldn't happen — the runtime always closes out, even if the agent crashes. The one case it can't fully cover is the VM being reclaimed at its 8h ceiling mid-turn: `/terminate` posts a notice and sets 🔴, but it has a hard 60s budget, so `grep terminate_notice_incomplete` if a long-running thread ends silently. Otherwise check the runtime logs |
+| Stuck on 🟡 | Shouldn't happen — the runtime always tries to close out, even if the agent crashes. Two cases it can't fully cover: the VM reclaimed at its 8h ceiling mid-turn (`/terminate` posts a notice and sets 🔴 but has a hard 60s budget — `grep terminate_notice_incomplete`), and Slack refusing the reaction permanently (see the next row). Otherwise check the runtime logs |
+| ⚠️ "I may not have finished everything" with NO colour at all | Slack permanently refused the status reaction, so neither the agent nor the runtime could set one — the answer above it is usually fine. `grep slack_status_warning` for the reason; `message_not_found` means the trigger message is gone (see that row). The tools deliberately stop retrying after one attempt rather than burning the turn on a colour |
 | A reply or question in-thread but NO 🟢/🔴/❓ | Slack refused the reaction. `grep slack_status_warning` in the runtime logs for the reason; the message itself did land. `message_not_found` means the thread's VM is serving a session id for a message that doesn't exist — see the next row |
 | `message_not_found` on every `reactions.add` | The thread's microVM was started for a DIFFERENT (or synthetic) message ts. Happens if you tested the webhook with a hand-crafted payload: that fake thread id claims a session row, and a later real mention can land on it. Fix: terminate that VM and delete its row from the session table, then start a NEW Slack thread. Don't hand-craft `ts` values against a live agent |
 | The agent replies but a follow-up gets only 👀 | Expected if the earlier turn is still running: the follow-up is INJECTED into it as a course-correction rather than starting a new turn (`grep message_injected`), so there's no separate reply. It should still pick up the turn's terminal 🟢/🔴; if it doesn't, `grep also_react_capped` — only the most recent few injected messages get a reaction, since the sweep costs Slack calls on every status change |

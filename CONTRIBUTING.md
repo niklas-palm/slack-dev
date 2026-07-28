@@ -57,6 +57,20 @@ Four properties of the gate are load-bearing:
   turn.
 - **Delivery is read from what Slack accepted**, never from a parallel flag that could disagree.
 
+**3. One retry, then stop (`statusFailed`).** A failed status reaction used to return the hint "try
+again", so the model tried again — for ever, when the refusal was permanent (`message_not_found` on a
+deleted trigger message). One live turn called `set_thread_status` three times on the same dead message.
+The loop was OURS: the model was obeying our hint. So the first failure invites exactly one retry and
+every later one says *don't*, and `ask_user` never says "call ask_user again" at all — that would re-post
+the question, not just the reaction.
+
+This is the one piece of per-turn state that is **stored rather than derived**, against the rule above,
+because "have we already asked for a retry?" isn't recoverable from anything Slack tells us. Two things
+about it matter: it is **reset on success** (a transient blip early in a turn must not make the FIRST
+failure of the real closing sequence look like the second — otherwise a good answer ends with a spurious
+⚠️), and giving up is the right trade because the reply has already landed and the runtime attempts the
+reaction again at turn end. If Slack refuses permanently, the honest outcome is a reply with **no colour**.
+
 **Don't switch to `toolExecutor: "sequential"`.** Two reasons. It's slower where it matters: a
 three-command fan-out measures ~13.7s concurrent vs ~21.3s sequential end-to-end, because the agent's
 fan-out tool is `run_bash` (greps, `gh api`, log queries), not local file reads. And `settleDeclaredPosts`
