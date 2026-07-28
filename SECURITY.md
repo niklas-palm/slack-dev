@@ -43,8 +43,33 @@ you extend this — and if you widen either, say so loudly in your fork.
 - **Never push to the default branch / never merge is enforced by the prompt, not by IAM.** The App's
   `contents: write` technically allows both. Add a branch-protection rule if that matters to you.
 - **Secrets live in SSM SecureStrings** and reach the runtime as parameter *paths*; no value enters a
-  CloudFormation template. The prompt forbids echoing one, including the clone's remote URL, which
-  contains a live installation token.
+  CloudFormation template.
+- **The agent can read its own credentials, and nothing technically stops it sending them somewhere.**
+  This is the most important accepted risk here, so it's stated plainly rather than implied. The GitHub
+  App id/key are in the microVM's environment; `run_bash` spawns children that inherit it (which is how
+  the **github** skill mints a token at all), the clone's `.git/config` holds a live token, and egress is
+  unrestricted — so `curl` can reach any host. Only the system prompt stands in the way, and a prompt is
+  not a security control: a sufficiently convincing injection in a PR body, a CI log or a fetched page
+  could in principle talk the agent into exfiltration.
+
+  We accept it, because the credential is deliberately weak and the blast radius small: the installation
+  token lasts ~1h, the App is scoped to ONE repository, and it cannot merge, push to a protected branch,
+  administer the repo, or touch any other repo. Worst realistic case is an hour of unwanted branches and
+  PR comments on a repo whose source is public anyway — not a breach. `ReadOnlyAccess` grants no
+  `secretsmanager:GetSecretValue`, no `ssm:GetParameter` and no `kms:Decrypt` (verified against the AWS
+  managed policy), and the stack adds an explicit Deny so a VM can't read another agent's SSM secrets.
+
+  For calibration: this is the same trade anyone makes running a coding agent locally with a `gh` token
+  or an SSH key in their shell — the agent can read the credential and reach the network, and only its
+  instructions say otherwise. The difference here is in our favour: a personal token usually carries
+  every repo you can touch and the power to merge, while this one expires in ~1h, sees ONE repo, and can
+  only propose. What's genuinely different is *who can trigger it* — a teammate in a Slack channel rather
+  than you at your keyboard — which is why `allowedChannels` is the control that matters most.
+
+  **If that trade doesn't hold for you** — a private repo with valuable history, an org-wide install, a
+  broad channel policy — the fix that actually works is **egress restriction** (allow only GitHub, Slack
+  and Bedrock). Explicit GitHub tools would *not* fix it: the agent needs a working clone to do its job,
+  and a clone's credentials are reachable from the shell it debugs in.
 
 See the README's *Guardrails* and *Trust boundary* sections for the full picture, including which
 protections are enforced in code and which are prompt-only.
