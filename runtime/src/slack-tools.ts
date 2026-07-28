@@ -370,8 +370,8 @@ Posts the question, sets the ❓ waiting reaction, and finishes the turn — the
 to continue. Use this when a request is genuinely ambiguous or a decision is theirs to make, not to
 confirm routine steps.
 
-If Slack rejects the reaction this returns success:false and the turn does NOT end — call it again, or
-answer and use set_thread_status if you'd rather finish.`,
+If Slack rejects the ❓ this returns success:false and the turn does NOT end. The question itself already
+posted, so do NOT call this again — calling it again re-posts the question. Read the hint.`,
   inputSchema: z.object({
     question: z.string().min(1).describe("The question, in Slack mrkdwn."),
   }),

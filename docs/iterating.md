@@ -49,8 +49,9 @@ Keep it to a page or two — it's read on every turn, so every line costs tokens
 
 Nothing regenerates `PROMPT.md`, so it rots: a stack gets renamed, a table goes away, the test command
 changes. The agent is the only thing that sees both this file and the live system, so the base prompt
-tells it to end its reply with a short `⚠️ Prompt drift` note whenever the two disagree — a log-group
-substring that matches nothing, a resource that no longer exists, a convention that isn't true any more.
+tells it to end its reply with a short `⚠️ Prompt drift` note whenever something it verified that turn
+disagrees with what you wrote — a log-group substring that matches nothing, a renamed resource, a
+convention that isn't true any more.
 
 It only reports what it verified during that turn, and it never edits `PROMPT.md` itself: fixing it is a
 normal edit plus `npm run image`. Treat a drift note as the signal that the briefing needs a few minutes,

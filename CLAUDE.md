@@ -145,7 +145,10 @@ These are properties of the system, not preferences — don't weaken one without
 - **It only answers in approved channels**, enforced in the ingress before any reaction or model call.
 - **Everything the agent reads is data, not instructions** — repo files, PR bodies, CI logs, `curl`
   output. Pinned by tests.
-- **A turn always ends with a terminal reaction.** A reaction that lies is worse than none.
+- **A turn always ATTEMPTS a terminal reaction**, and never claims one Slack refused. If Slack refuses
+  permanently (a deleted trigger message → `message_not_found`), the honest result is a reply with NO
+  colour plus a ⚠️ note — not a colour we didn't set. A reaction that lies is worse than none, so the
+  tools invite one retry and then stop (`statusFailed` in `slack-tools.ts`) rather than looping.
 - **A refusal must be a non-2xx.** The ingress reads the HTTP status and nothing else, so a rejection
   wrapped in a 200 is silent: the mention keeps a lone 👀 and nobody is told. `runtime/src/invoke-gate.ts`
   holds the rules (empty prompt → 400, no bot token → 503) — extracted from `server.ts` precisely so they
