@@ -140,7 +140,13 @@ function awaitManifestCode(manifest: Record<string, unknown>): Promise<string> {
 
     server.on("error", reject);
     server.listen(PORT, () => {
-      console.log(`\nOpening your browser. If it doesn't open, visit http://localhost:${PORT}\n`);
+      // Say what is about to be created BEFORE opening the browser. The page auto-submits to GitHub, so
+      // from the operator's side one keystroke away is a real App on their account — and an App can only
+      // be deleted by hand, since GitHub has no API for it. Naming it here makes an accidental run
+      // obvious while the tab is still closable.
+      console.log(`\nAbout to register the GitHub App "${String(manifest.name)}" on your account.`);
+      console.log(`Nothing is created until you click "Create GitHub App" — close the tab to abort.\n`);
+      console.log(`Opening your browser. If it doesn't open, visit http://localhost:${PORT}\n`);
       openBrowser(`http://localhost:${PORT}`);
     });
     // An hour is GitHub's own limit on the code; no point waiting longer.
