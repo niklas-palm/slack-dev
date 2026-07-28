@@ -470,7 +470,10 @@ Available in the image: git, gh, curl, jq, ripgrep, openssl, node, npm, python3.
         success: r.code === 0 && !r.timedOut,
         truncated: r.truncated,
       };
-      if (r.timedOut) result.error_summary = `timed out after ${seconds}s`;
+      if (r.timedOut) {
+        result.error_summary = `timed out after ${seconds}s`;
+        result.hint = `raise \`timeout\` (max 900) for a long build or test suite, or start it in the background and poll: \`(nohup <cmd> > /tmp/out.log 2>&1 &)\` then read the log on a later call.`;
+      }
       else if (r.code !== 0) result.error_summary = clip(r.stderr.trim() || `exit code ${r.code}`, 500);
       return result;
     } catch (e) {
@@ -499,7 +502,14 @@ print() whatever you need to see; no state persists between calls.`,
       writeFileSync(script, code);
       const seconds = Math.min(Math.max(timeout, 1), 900);
       const r = await runChild("python3", [script], { timeoutMs: seconds * 1000 });
-      if (r.timedOut) return { success: false, error_summary: `python timed out after ${seconds}s` };
+      // A timeout with no guidance made one agent tell the person "one of my searches hung" and move on.
+      // The usual cause is an unbounded CloudWatch query, which has a fix the model can apply itself.
+      if (r.timedOut)
+        return {
+          success: false,
+          error_summary: `python timed out after ${seconds}s`,
+          hint: "narrow it rather than just retrying: bound the time range (startTime/endTime), set limit, filter server-side (filterPattern), or page. Raise `timeout` (max 900) only if the work genuinely needs longer.",
+        };
       return {
         stdout: r.stdout,
         stderr: r.stderr,

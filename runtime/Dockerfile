@@ -78,8 +78,15 @@ COPY skills ./skills
 COPY start.sh ./start.sh
 RUN chmod +x ./start.sh && mkdir -p /workspace
 
-ENV NODE_ENV=production \
-    NODE_NO_WARNINGS=1 \
+# NOTE: deliberately NO `NODE_ENV=production` — it broke every repo the agent clones.
+#
+# npm derives `omit=dev` from it (verify: `NODE_ENV=production npm config get omit` → `dev`), so an
+# `npm ci` in the agent's WORKSPACE installed no devDependencies, and the repo's own typecheck and tests
+# then failed on a missing `vitest`/`@types`. Every `run_bash` child inherits the image env, so this
+# applied to somebody else's project, not ours. Two agents each burned ~7 turns of Opus 5 diagnosing it
+# before finding the cause was us. It bought nothing in return: this image's own deps are installed by
+# the `npm ci` above, and nothing in src/ reads NODE_ENV.
+ENV NODE_NO_WARNINGS=1 \
     WORKSPACE_DIR=/workspace \
     HOME=/workspace \
     HOOK_PORT=9000

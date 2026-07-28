@@ -56,6 +56,8 @@ export interface SlackTurn {
   target: SlackTarget;
   replied: boolean;
   status: "working" | "waiting" | "done" | "failed" | null;
+  /** Failed `set_thread_status` attempts, so we stop telling the model to retry a permanent refusal. */
+  statusAttempts?: number;
   /** Dedupes identical posts within one turn, so a retrying model can't double-post. */
   posted: Map<string, string>;
   /** Serializes every state mutation for this turn. Never awaited from inside a locked section. */
@@ -323,12 +325,20 @@ others. The 👀 acknowledgement stays. The runtime already set 🟡 working, so
       // thread is closed while it still shows 🟡 — a reaction that lies, which this protocol exists to
       // prevent. The sweep and this write share a critical section, so they can't describe different runs.
       if (!ok) {
+        // Count the attempts, because "try again" is only useful for a TRANSIENT refusal. A permanent one
+        // (the message was deleted, or this VM is serving a session id whose message never existed) fails
+        // identically for ever — and the model dutifully obeyed the hint, so one turn called this three
+        // times in a row on a `message_not_found`. After a couple of tries, stop asking: the reply itself
+        // already landed, and a missing colour is not worth more of the turn.
+        turn.statusAttempts = (turn.statusAttempts ?? 0) + 1;
+        const giveUp = turn.statusAttempts >= 2;
         return {
           success: false,
           status,
-          error:
-            "Slack did not accept the reaction, so the thread still shows 🟡",
-          hint: "try set_thread_status again",
+          error: "Slack did not accept the reaction, so the thread still shows 🟡",
+          hint: giveUp
+            ? "do NOT retry — this failure is not transient. The runtime will mark the thread when the turn ends. Carry on, or finish your answer."
+            : "try set_thread_status again — once. If it fails the same way, it is not transient.",
         };
       }
       turn.status = status;

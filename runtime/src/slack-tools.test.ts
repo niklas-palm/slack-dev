@@ -229,6 +229,24 @@ describe("set_thread_status", () => {
     expect(await setThreadStatus(target, "done")).toBe(false);
   });
 
+  // Observed live: three set_thread_status calls in ONE turn, each answered "try again", against a
+  // message_not_found that could never succeed. The hint was ours, so the loop was ours.
+  it("stops telling the model to retry a refusal that won't clear", async () => {
+    const t = turn();
+    t.replied = true;
+    const hints: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      responses = [{ ok: true }, { ok: true }, { ok: true }, { ok: false, error: "message_not_found" }];
+      const r = (await call("set_thread_status", { status: "done" }, t)) as Record<string, string>;
+      expect(r.success).toBe(false);
+      hints.push(r.hint!);
+    }
+    expect(hints[0]).toMatch(/again/);
+    // By the second failure it must stop asking, or the model keeps burning the turn on a colour.
+    expect(hints[1]).toContain("do NOT retry");
+    expect(hints[2]).toContain("do NOT retry");
+  });
+
   it("never touches the 👀 acknowledgement", async () => {
     const t = turn();
     t.replied = true;
