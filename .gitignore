@@ -8,7 +8,8 @@ dist/
 .env.local
 
 # Your agent's own config: channel ids, repo name, agent name. Not secret, but org-specific — copy
-# agent.config.example.json to agent.config.json and edit that.
+# agent.config.example.json to agent.config.json and edit that. (agent.config.ci.json IS committed —
+# it's this repo's own config for deploying itself from Actions, and carries nothing secret.)
 agent.config.json
 
 # Scratch/debug files (review probes, one-off harnesses) — never commit these.

@@ -78,6 +78,12 @@ jobs:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: eu-west-1 # the only region Lambda MicroVMs is available in
 
+      # agent.config.json is gitignored so a FORK never inherits someone's channel ids or repo. This
+      # repo deploys ITSELF, so its own config is committed separately and copied into place — visible
+      # in git, reviewable in a diff, and it can't leak into a clone.
+      - name: Use this repo's own agent config
+        run: cp agent.config.ci.json agent.config.json
+
       # Order matters. The image IS the agent (it carries PROMPT.md, the skills, the tools); the stack
       # only routes to it. Building first means a fresh account has an image ARN in SSM before the
       # ingress that reads it goes live — deploying first would leave a webhook pointing at nothing.

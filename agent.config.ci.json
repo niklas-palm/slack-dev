@@ -1,0 +1,7 @@
+{
+  "name": "dev",
+  "displayName": "slack-dev",
+  "description": "Slack Dev — iterates on niklas-palm/slack-dev, debugs, and opens PRs.",
+  "githubRepo": "niklas-palm/slack-dev",
+  "allowedChannels": []
+}
