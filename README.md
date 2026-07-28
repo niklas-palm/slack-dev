@@ -275,6 +275,12 @@ before changing `slack-tools.ts` or a runtime dependency. **Working on this with
 - **No web-search tool and no hardened fetcher.** `curl` inside `run_bash` is the only web access, with
   no SSRF guard, size cap, or content-type check. Fine for a trusted workspace fetching a doc page; port
   a real fetcher with those guards if you need research.
+- **The agent can read its own GitHub credential, and egress is unrestricted.** Only the system prompt
+  stops it sending one somewhere, and a prompt isn't a security control. This is the same trade you make
+  running any coding agent on your laptop with your `gh` token in the environment — the difference is that
+  here the credential is a ~1h token scoped to ONE repo that cannot merge or push to a protected branch,
+  which is a good deal *less* than your personal token. Accepted deliberately; the reasoning, the blast
+  radius, and the fix if it doesn't suit you are in [SECURITY.md](./SECURITY.md).
 - **Cost is per warm thread.** Each Slack thread runs a 4 GB microVM that suspends after 45 minutes idle
   (compute billing stops) and is terminated at 8h. So you pay for minutes of active work per thread, not
   for the whole day — but an agent left thinking in ten threads is ten VMs. Tune `idleSessionTimeout`
