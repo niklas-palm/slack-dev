@@ -60,6 +60,37 @@ the limitation.
 The safe rule either way: **anything the agent needs at run time belongs in the image Dockerfile**, where
 DNS works normally. Prefer `docker pull` of a prebuilt image over building one in the VM.
 
+## The IAM you need, including one that only fails on a real call
+
+Two grants are easy to miss because neither shows up at synth, in a dry run, or in any template.
+
+**`lambda:PassNetworkConnector`** — needed to *run* a VM, and also to **build an image**:
+`CreateMicrovmImage` validates the connectors the image will run with. It's a permission distinct from
+`CreateMicrovmImage`/`RunMicrovm`, scoped to the connector ARNs:
+
+```
+arn:aws:lambda:<region>:aws:network-connector:aws-network-connector:ALL_INGRESS
+arn:aws:lambda:<region>:aws:network-connector:aws-network-connector:INTERNET_EGRESS
+```
+
+**The action names use `Microvm`, lowercase `vm`** — they match the API operation names exactly. Wrong
+casing (`MicroVm`) means the action doesn't exist, so the policy looks correct and every call is denied.
+
+Also worth knowing:
+
+- The **image build role** needs `s3:GetObject` on the artifacts bucket **plus**
+  `logs:CreateLogGroup`/`CreateLogStream`/`PutLogEvents`. Without the log grants Lambda cannot write the
+  build log — and a failed build then tells you to go read a log that was never created.
+- The **execution role** needs those same three `logs:` actions. `ReadOnlyAccess` grants
+  `logs:Describe*`/`Get*`/`List*` but **not** `CreateLogStream` or `PutLogEvents`, so without an explicit
+  grant every log line the agent emits is silently dropped — which hides every other failure.
+- Both roles are assumed by `lambda.amazonaws.com`, with `sts:AssumeRole` **and `sts:TagSession`**.
+- A role created seconds before its first `run-microvm` can fail with *"We were unable to assume the role
+  provided"* — that's IAM propagation, not a wrong trust policy. Retry before debugging.
+
+Reference implementations: `infra/lib/stack.ts` (the execution role), `infra/microvm/build.sh` (the build
+role), `scripts/setup-github-oidc.sh` (what CI needs).
+
 ## Lifecycle hooks
 
 Configured with `--hooks` at image build. Your entrypoint runs an HTTP server on the hook port; Lambda

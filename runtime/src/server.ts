@@ -248,12 +248,17 @@ async function readJson(
 }
 
 /**
- * Resolve the SSM secrets onto process.env, once per VM (`/run` is delivered at least once, and
- * `/resume` may fire many times). `force` re-reads them, which is how a rotation reaches a long-lived VM.
+ * Resolve the SSM secrets onto process.env, once per VM.
+ *
+ * `/run` is delivered at least once and `/resume` may fire many times, so this latches on SUCCESS only —
+ * a failed read is retried by the next hook rather than leaving the VM to serve turns with no
+ * credentials. It does not re-read after a success: `loadSecretsFromSsm` skips any var already set, so a
+ * rotation mid-life would need an overwrite there, not a flag here. A VM lives at most 8h, so the next
+ * one picks up a rotated secret anyway.
  */
 let secretsLoaded = false;
-async function ensureSecrets(force = false): Promise<void> {
-  if (secretsLoaded && !force) return;
+async function ensureSecrets(): Promise<void> {
+  if (secretsLoaded) return;
   try {
     await loadSecretsFromSsm();
     secretsLoaded = true;
@@ -307,9 +312,9 @@ const server = createServer((req, res) => {
         return send(200, { ok: true });
       }
       if (path === `${HOOK_BASE}/resume` && req.method === "POST") {
-        // Memory survives suspension, so the Agent and its conversation are still here. Re-read the
-        // secrets anyway: a rotation while this VM slept would otherwise go unnoticed for its 8h life.
-        await ensureSecrets(true);
+        // Memory survives suspension, so the Agent and its conversation are still here. Still call this:
+        // if the /run read FAILED, this is another chance before the next turn.
+        await ensureSecrets();
         return send(200, { ok: true });
       }
       if (path === `${HOOK_BASE}/suspend` && req.method === "POST") {

@@ -12,6 +12,7 @@ import { parse } from "yaml";
 import { describe, expect, it } from "vitest";
 
 import { REPO_ROOT } from "../lib/config.js";
+import { nextStep } from "../scripts/slack-setup-state.js";
 
 /** The seven scopes the runtime's Slack calls need. */
 const SCOPES = [
@@ -95,6 +96,35 @@ describe("the GitHub App's permissions", () => {
     }
     // Slack is the only trigger: an App with no events can't be woken by GitHub.
     expect(source).toMatch(/default_events: \[\] as string\[\]/);
+  });
+});
+
+// The credential-pairing hazard, learned the hard way: the signing secret and the bot token are only
+// valid TOGETHER, from the same app. A re-run that created a second app overwrote the first's secret,
+// leaving a pair from two different apps — every HMAC check fails, and Slack shows only a red
+// events-URL error that names nothing.
+//
+// This tests the DECISION, not the source text. An earlier version of these tests grepped the file and
+// passed against the very bug it was written for, because the string it matched was in a comment.
+describe("what a re-run of the Slack setup should do", () => {
+  it("creates the app only when nothing is stored yet", () => {
+    expect(nextStep(false, false, false)).toBe("create");
+    expect(nextStep(false, false, true)).toBe("create");
+  });
+
+  it("stores a supplied token WITHOUT creating a second app", () => {
+    // The exact case that produced the incident: the app exists, the operator now has its token.
+    expect(nextStep(true, false, true)).toBe("store-token");
+  });
+
+  it("refuses to create another app when one exists but isn't installed", () => {
+    // Guarding on the TOKEN alone would return "create" here — a second app, and a clobbered secret.
+    expect(nextStep(true, false, false)).toBe("need-token");
+  });
+
+  it("does nothing when both are already stored", () => {
+    expect(nextStep(true, true, false)).toBe("done");
+    expect(nextStep(true, true, true)).toBe("done");
   });
 });
 

@@ -19,7 +19,8 @@ HERE="$(cd "$(dirname "$0")/.." && pwd)"
 REGION=eu-west-1
 ISSUER=token.actions.githubusercontent.com
 
-REPO="${1:-$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("githubRepo",""))' "$HERE/agent.config.json" 2>/dev/null || true)}"
+# node, not python3 — node is already required and macOS no longer ships python3.
+REPO="${1:-$(node -e 'try{process.stdout.write(String(require(process.argv[1]).githubRepo??""))}catch{}' "$HERE/agent.config.json")}"
 if [ -z "$REPO" ] || [ "$REPO" = "OWNER/REPOSITORY" ]; then
   echo "✗ Need a repo. Set \"githubRepo\" in agent.config.json, or pass it: npm run setup:oidc -- owner/repo" >&2
   exit 1
@@ -52,7 +53,14 @@ fi
 #       curl -sH "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
 #         "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" \
 #         | python3 -c 'import json,sys,base64; t=json.load(sys.stdin)["value"].split(".")[1]; print(base64.urlsafe_b64decode(t+"=="))'
-IDS="$(gh api "repos/${REPO}" --jq '"\(.owner.login)@\(.owner.id)/\(.name)@\(.id)"' 2>/dev/null || true)"
+# Check the EXIT CODE, and sanity-check the shape. On a 404 `gh` still prints its error JSON to stdout,
+# so `|| true` plus a non-empty test happily produced
+# `repo:{"message":"Not Found",...}:ref:refs/heads/main` — a trust policy no token can ever match, which
+# surfaces much later as the same misleading "Not authorized" this comment warns about.
+IDS=""
+if OUT="$(gh api "repos/${REPO}" --jq '"\(.owner.login)@\(.owner.id)/\(.name)@\(.id)"' 2>/dev/null)"; then
+  case "$OUT" in *@[0-9]*/*@[0-9]*) IDS="$OUT" ;; esac
+fi
 if [ -n "$IDS" ]; then
   SUBJECT="repo:${IDS}:ref:refs/heads/main"
   echo "▸ subject (from the GitHub API): ${SUBJECT}"
@@ -147,22 +155,7 @@ cat <<EOF
 Next, in https://github.com/${REPO}/settings/variables/actions
   → New repository variable, name AWS_DEPLOY_ROLE_ARN, value the ARN above.
 
-Then protect main, because with this workflow push access to main IS deploy access. Pass a JSON body —
-gh's -f/-F flags can't express the nested objects this endpoint needs, and silently do nothing:
-
-  cat > /tmp/prot.json <<'JSON'
-  {
-    "required_status_checks": { "strict": true, "contexts": ["check"] },
-    "enforce_admins": true,
-    "required_pull_request_reviews": { "required_approving_review_count": 0, "dismiss_stale_reviews": true },
-    "restrictions": null,
-    "allow_force_pushes": false,
-    "allow_deletions": false,
-    "required_conversation_resolution": true
-  }
-JSON
-  gh api -X PUT repos/${REPO}/branches/main/protection --input /tmp/prot.json
-
-  # 0 approvals is deliberate for a solo maintainer: requiring one you can't self-approve blocks
-  # every PR, including the agent's. Raise it once someone else can review.
+Then protect `main` — with this workflow, push access to main IS deploy access.
+setup.md's "Deploying from GitHub Actions" section has the exact command (it needs a JSON body; gh's
+-f/-F flags silently do nothing for that endpoint).
 EOF

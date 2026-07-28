@@ -30,6 +30,7 @@ import {
 
 import { REGION } from "../lib/config.js";
 import { arg, openBrowser, requireConfig } from "./cli.js";
+import { nextStep } from "./slack-setup-state.js";
 
 /** Shared across every agent, so it lives outside the per-agent prefix. */
 const CONFIG_TOKEN_PARAM = "/slack-dev/_shared/slack-config-refresh-token";
@@ -71,6 +72,24 @@ async function slack(
       "Content-Type": "application/json; charset=utf-8",
     },
     body: JSON.stringify(body),
+  });
+  return (await res.json()) as Record<string, unknown>;
+}
+
+/**
+ * Some Slack methods take FORM-ENCODED parameters and reject a JSON body with `invalid_arguments` —
+ * `tooling.tokens.rotate` is one, and its error names nothing about encoding, so it reads like a bad
+ * token. (Verified: the same refresh token returns `ok:false invalid_arguments` as JSON and `ok:true`
+ * form-encoded.) The manifest methods below DO take JSON, hence both helpers.
+ */
+async function slackForm(
+  method: string,
+  params: Record<string, string>,
+): Promise<Record<string, unknown>> {
+  const res = await fetch(`https://slack.com/api/${method}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(params).toString(),
   });
   return (await res.json()) as Record<string, unknown>;
 }
@@ -130,9 +149,7 @@ async function accessToken(): Promise<string> {
     process.exit(1);
   }
 
-  const r = await slack("tooling.tokens.rotate", "", {
-    refresh_token: refresh,
-  });
+  const r = await slackForm("tooling.tokens.rotate", { refresh_token: refresh });
   if (!r.ok) {
     console.error(`✗ Could not refresh the Slack config token: ${r.error}`);
     if (r.error === "invalid_refresh_token") {
@@ -225,12 +242,40 @@ if (provided) {
 const agent = requireConfig();
 const appName = arg("app-name") ?? agent.displayName;
 
-if (await ssmGet(`${agent.ssmPrefix}/slack-bot-token`)) {
-  console.log(
-    `${agent.ssmPrefix}/slack-bot-token already exists — Slack is configured for "${agent.name}".`,
+
+
+// What to do given what's already stored. The signing secret is written the instant an app is created;
+// the bot token only after a human installs it — so the three states are distinguishable, and each wants
+// a different action. Exported and pure so the decision is actually testable (see manifests.test.ts).
+const decision = nextStep(
+  Boolean(await ssmGet(`${agent.ssmPrefix}/slack-signing-secret`)),
+  Boolean(await ssmGet(`${agent.ssmPrefix}/slack-bot-token`)),
+  Boolean(process.env.SLACK_BOT_TOKEN?.trim()),
+);
+
+if (decision === "store-token") {
+  // The app exists but was never installed. Store the token the operator just supplied and touch
+  // nothing else — re-running the creation path here is what produced a second app.
+  await ssmPut(`${agent.ssmPrefix}/slack-bot-token`, process.env.SLACK_BOT_TOKEN!.trim());
+  console.log(`✓ ${agent.ssmPrefix}/slack-bot-token`);
+  console.log(`\nSlack is connected. Invite the bot and mention it:\n  /invite @${agent.displayName}`);
+  process.exit(0);
+}
+
+if (decision === "need-token") {
+  console.error(
+    `✗ A Slack app already exists for "${agent.name}" but isn't installed yet.\n\n` +
+      `  Creating another would overwrite this one's signing secret and break both, so instead:\n` +
+      `    1. install the app and copy its Bot User OAuth Token (https://api.slack.com/apps)\n` +
+      `    2. export SLACK_BOT_TOKEN='<the xoxb- token>' && npm run slack-app`,
   );
-  console.log(`Delete that parameter first if you want to start over.`);
   process.exit(1);
+}
+
+if (decision === "done") {
+  console.log(`Slack is already configured for "${agent.name}".`);
+  console.log(`Delete ${agent.ssmPrefix}/slack-{signing-secret,bot-token} to start over.`);
+  process.exit(0);
 }
 
 const requestUrl = await deployedEventsUrl(agent.stackName);

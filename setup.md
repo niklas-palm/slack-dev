@@ -44,7 +44,6 @@ app — no API can consent on the workspace's behalf.
 - AWS CLI v2, plus **temporary credentials in your shell** (`AWS_ACCESS_KEY_ID`,
   `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`) for the target account. Setup CREATES things — an S3
   bucket, IAM roles, SSM SecureStrings, a CloudFormation stack — so read-only credentials won't do.
-- Python 3 (the setup script uses it to read your config)
 
 Install the dependencies first — every `npm run` below needs them:
 
@@ -225,8 +224,14 @@ opens the install page. Then:
 > **Having an AI agent run your setup?** Both tokens are read from the environment
 > (`SLACK_CONFIG_REFRESH_TOKEN`, `SLACK_BOT_TOKEN`), so you can run just this step yourself and keep the
 > secrets in your own shell. Run non-interactively without one and the script says so and exits rather
-> than hanging on a prompt nobody can see — but note the Slack app already exists at that point, so set
-> the variable and re-run rather than starting over.
+> than hanging on a prompt nobody can see.
+>
+> **The app exists at that point**, so what a re-run does depends on one thing:
+>
+> - **with `SLACK_BOT_TOKEN` exported** → it stores the token and creates nothing. This is the recovery.
+> - **without it** → it refuses and tells you why. Creating a second app would overwrite the first's
+>   signing secret, leaving a secret and a token from *different* apps — which fails every HMAC check
+>   while Slack shows only a red events-URL error that names nothing.
 
 That's the only value you copy by hand, and only because a bot token doesn't exist until a workspace
 installs the app — no API can consent for it. Everything else, including the Event Subscriptions step
@@ -317,6 +322,10 @@ env -u AWS_PROFILE npm run invoke -- --prompt "Summarize what you know about thi
 Only step 3 touches AWS, and it's `npm run image` — **not** `npm run deploy`. The image carries the
 prompt; the stack only routes to it.
 
+**Teaching it more:** a skill is a folder — `runtime/skills/<name>/SKILL.md` — picked up with no
+registration and no code change. [docs/iterating.md](./docs/iterating.md) covers both seams: what belongs
+in the prompt versus a skill, and how to confirm the agent actually loaded yours.
+
 That hits the real deployed runtime and model; the answer lands in the logs (the command prints the
 `aws logs tail` line to follow).
 
@@ -342,7 +351,9 @@ env -u AWS_PROFILE aws logs tail "/aws/lambda/$FN" --region eu-west-1 --since 15
 | `missing_scope` in a tool result | You changed the manifest's scopes — reinstall the app (**OAuth & Permissions → Reinstall**) and re-copy the bot token |
 | 👀 but no 🟡 | The Lambda logs say whether it reached the VM at all (`grep '\[route\]'`). If it did, the agent failed to start — check the microVM log group |
 | Stuck on 🟡 | Shouldn't happen (the runtime always closes out) — check the runtime logs |
-| A reply or question in-thread but NO 🟢/🔴/❓ | Slack refused the reaction (rate limit, missing scope). `grep slack_status_warning` in the runtime logs; the message itself did land |
+| A reply or question in-thread but NO 🟢/🔴/❓ | Slack refused the reaction. `grep slack_status_warning` in the runtime logs for the reason; the message itself did land. `message_not_found` means the thread's VM is serving a session id for a message that doesn't exist — see the next row |
+| `message_not_found` on every `reactions.add` | The thread's microVM was started for a DIFFERENT (or synthetic) message ts. Happens if you tested the webhook with a hand-crafted payload: that fake thread id claims a session row, and a later real mention can land on it. Fix: terminate that VM and delete its row from the session table, then start a NEW Slack thread. Don't hand-craft `ts` values against a live agent |
+| The agent replies but a follow-up gets only 👀 | Expected if the earlier turn is still running: the follow-up is INJECTED into it as a course-correction rather than starting a new turn (`grep message_injected`). It'll be acted on within that turn |
 | "I hit my work limit for one turn" | The turn used all 200 model round-trips. `grep limitTurns` to confirm; mention it again to continue, and narrow the request |
 | 🔴 with the agent's own error message | It explains what failed; the runtime logs have the stack |
 | 🔴 with a ⚠️ note under a good-looking answer | The agent replied but never marked the thread done — the answer is probably fine. `grep incomplete_turn` in the runtime logs confirms it |
@@ -399,7 +410,7 @@ Two things worth knowing:
   deploys, so a deploy must not be able to widen its own permissions.
 - The role can publish the image ARN but **cannot read any agent's secrets** (no `ssm:GetParameter`, no
   `kms:Decrypt`). A compromised workflow can redeploy the agent; it can't exfiltrate a Slack token or a
-  GitHub private key. Pinned by tests in `infra/test/ci-stack.test.ts`.
+  GitHub private key.
 
 ## Adding a second agent
 

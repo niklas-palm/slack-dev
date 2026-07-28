@@ -19,7 +19,7 @@
     "setup:oidc": "bash scripts/setup-github-oidc.sh",
     "destroy": "npm run destroy -w infra",
     "secrets": "bash scripts/put-secrets.sh",
-    "invoke": "npm run invoke -w infra",
+    "invoke": "tsx infra/scripts/invoke.ts",
     "github-app": "tsx infra/scripts/create-github-app.ts",
     "slack-app": "tsx infra/scripts/create-slack-app.ts",
     "docker": "bash scripts/run-local.sh"
