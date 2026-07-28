@@ -2,7 +2,7 @@
 #
 # Auth is keyless via GitHub OIDC — there are NO AWS keys in this repo or in GitHub secrets. The only
 # value the workflow needs is the deploy role's ARN, which isn't sensitive (it's a repo VARIABLE, not
-# a secret). The role and its trust policy live in `infra/lib/ci-stack.ts`.
+# a secret). The role and its trust policy are created by `scripts/setup-github-oidc.sh`.
 #
 # ONE-TIME SETUP, in this order:
 #   1. env -u AWS_PROFILE npm run setup:oidc       # creates/reuses the provider + the deploy role

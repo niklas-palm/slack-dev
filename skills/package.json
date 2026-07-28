@@ -1,0 +1,12 @@
+{
+  "name": "slack-dev-skill",
+  "version": "1.0.0",
+  "description": "Install the create-slack-dev skill: ask your coding agent to stand up a Slack agent for a repo and an AWS account.",
+  "license": "MIT-0",
+  "type": "module",
+  "bin": { "slack-dev-skill": "install.mjs" },
+  "files": ["install.mjs", "create-slack-dev"],
+  "keywords": ["slack", "agent", "claude", "skill", "aws", "bedrock"],
+  "repository": { "type": "git", "url": "git+https://github.com/niklas-palm/slack-dev.git", "directory": "skills" },
+  "engines": { "node": ">=18" }
+}

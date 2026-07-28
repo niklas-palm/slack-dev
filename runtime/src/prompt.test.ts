@@ -1,7 +1,11 @@
 // The prompt is load-bearing: if the "post to Slack or the human sees nothing" rule ever drops out,
 // the agent silently starts failing in the one way that looks like success. Pin it.
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { join, resolve } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
+import { SKILLS_DIR } from "./config.js";
 import { buildSystemPrompt } from "./prompt.js";
 
 describe("the system prompt", () => {
@@ -74,5 +78,35 @@ describe("the per-agent PROMPT.md", () => {
     // The placeholder body survives, which is what proves the file is actually being read — if this
     // ever passed while the comment test also passed trivially, the file wouldn't be loading at all.
     expect(prompt).toContain("You look after");
+  });
+});
+
+// The skills directory is the agent's main extension point: a user adds a folder and expects it to be
+// picked up with no code change. That contract is easy to break silently — a moved directory, a renamed
+// env var, a plugin that stops being registered — and the symptom is only "the agent ignored my skill".
+describe("the skills seam", () => {
+  it("points at runtime/skills, which is what the docs tell users to edit", () => {
+    expect(SKILLS_DIR.endsWith("/skills")).toBe(true);
+    expect(existsSync(SKILLS_DIR), `${SKILLS_DIR} must exist`).toBe(true);
+  });
+
+  it("ships every skill folder in the image", () => {
+    // The image is what the microVM boots; a skill left out of the COPY exists locally and nowhere else.
+    const dockerfile = readFileSync(
+      resolve(import.meta.dirname, "..", "Dockerfile"),
+      "utf8",
+    );
+    expect(dockerfile).toMatch(/COPY skills \.\/skills/);
+  });
+
+  it("gives every shipped skill a name and a trigger-shaped description", () => {
+    // The description is the ONLY part always in context — it's what makes the agent decide to load the
+    // skill at all. A missing or vague one means the skill is dead weight.
+    for (const dir of readdirSync(SKILLS_DIR)) {
+      const md = readFileSync(join(SKILLS_DIR, dir, "SKILL.md"), "utf8");
+      expect(md, `${dir} needs frontmatter`).toMatch(/^---\n/);
+      expect(md, `${dir} needs a name`).toMatch(/\nname:\s*\S/);
+      expect(md, `${dir} needs a description`).toMatch(/\ndescription:\s*\S/);
+    }
   });
 });

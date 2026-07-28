@@ -19,7 +19,10 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 REGION=eu-west-1 # the only region Lambda MicroVMs is available in
 
 # Read the agent's name from its config, the same source CDK uses.
-cfg() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2],""))' "$ROOT/agent.config.json" "$1" 2>/dev/null || true; }
+# Read config with NODE, not python3: node is already a hard prerequisite, and python3 isn't bundled with
+# macOS any more. The old `python3 … || true` also SWALLOWED a missing interpreter, so the script then
+# reported "set a real name in agent.config.json" about a config that was perfectly fine.
+cfg() { node -e 'const c=require(process.argv[1]);process.stdout.write(String(c[process.argv[2]]??""))' "$ROOT/agent.config.json" "$1"; }
 NAME="$(cfg name)"
 DISPLAY_NAME="$(cfg displayName)"
 GITHUB_REPO="$(cfg githubRepo)"

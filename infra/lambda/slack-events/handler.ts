@@ -64,17 +64,14 @@ export function channelAllowed(
 const ssm = new SSMClient({ region: REGION });
 const ddb = new DynamoDBClient({ region: REGION });
 
-// Warm-container SSM cache. A cached value can go stale across a deploy — most dangerously the
-// runtime ARN, which is republished whenever the runtime is REPLACED: a warm Lambda would keep
-// invoking a deleted ARN, producing the silent "eyes but no reply" failure. So callers can force a
-// refetch, and invalidate() drops a key so the next read goes back to SSM.
+// Warm-container SSM cache. A cached value survives until the container recycles, so a rotated secret
+// needs a redeploy to take effect promptly — setup.md's troubleshooting says so. The image ARN is stable
+// across rebuilds by design (that's the point of the SSM indirection), so it doesn't go stale.
 const cache = new Map<string, string>();
 
-async function ssmValue(name: string, refresh = false): Promise<string> {
-  if (!refresh) {
-    const hit = cache.get(name);
-    if (hit) return hit;
-  }
+async function ssmValue(name: string): Promise<string> {
+  const hit = cache.get(name);
+  if (hit) return hit;
   const r = await ssm.send(
     new GetParameterCommand({ Name: name, WithDecryption: true }),
   );

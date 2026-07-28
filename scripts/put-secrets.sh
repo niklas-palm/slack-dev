@@ -16,7 +16,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 REGION="eu-west-1"
-NAME="$(python3 -c 'import json; print(json.load(open("agent.config.json"))["name"])')"
+# node, not python3: node is already a hard prerequisite and macOS no longer bundles python3. The old
+# form exited 127 with no message at all when it was missing.
+NAME="$(node -e 'process.stdout.write(String(require("./agent.config.json").name??""))')"
 PREFIX="/slack-dev/${NAME}"
 
 if [ "$NAME" = "demo" ]; then

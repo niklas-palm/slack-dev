@@ -9,7 +9,28 @@ Runs entirely in AWS: one **Lambda MicroVM** per Slack thread, **Claude Opus 5**
 Built to be **cloned per agent**: set a name, write a prompt, deploy. Registering the GitHub App and the
 Slack app are scripted, so standing one up is three clicks and one copied value.
 
-**→ [setup.md](./setup.md) — zero to a working agent, about 10 minutes.**
+## Let your coding agent set it up
+
+```bash
+npx slack-dev-skill        # installs the `create-slack-dev` skill
+```
+
+Then, in the repo you want an agent for, just ask: **"create a slack agent for this repo"**. Your agent
+gathers the few things it must not guess, registers the GitHub App, deploys, and walks you through the
+handful of clicks that have no API. It writes the skill for **Claude Code** (`~/.claude/skills/`) and, if
+the directory has an `AGENTS.md`, adds a pointer there for **Codex** and other AGENTS.md-based agents.
+
+No npm? The skill is just markdown — [`skills/create-slack-dev/`](./skills/create-slack-dev) in this repo:
+
+```bash
+git clone https://github.com/niklas-palm/slack-dev
+cp -R slack-dev/skills/create-slack-dev ~/.claude/skills/
+```
+
+Prefer to do it yourself, or want to know what the skill is doing?
+
+**→ [setup.md](./setup.md) — zero to a working agent by hand, about 10 minutes.**
+**→ [docs/iterating.md](./docs/iterating.md) — then teach it about your system: the prompt and skills.**
 
 ```mermaid
 flowchart LR
@@ -103,7 +124,9 @@ bounded output.
   fallback above possible.
 
 **Skills** load on demand rather than sitting in the prompt: the agent sees each skill's name and
-one-line description and pulls the full instructions when it needs them.
+one-line description and pulls the full instructions when it needs them. **Adding one is a folder** —
+`runtime/skills/<name>/SKILL.md`, no registration and no code change. See
+[docs/iterating.md](./docs/iterating.md).
 
 - **github** — mint a token, clone, branch, run the repo's checks, open or update a PR, leave a review
   with inline comments.
@@ -182,6 +205,8 @@ Harden command execution before pointing this at untrusted users.
 │   └── scripts/          create-github-app · create-slack-app · invoke · cli
 ├── CLAUDE.md             ← house rules + commands: the entry point for a coding agent
 ├── .github/workflows/    ← THIS repo's own deploy (keyless OIDC). Delete it in a clone.
+├── skills/               ← the create-slack-dev INSTALLER skill (`npx slack-dev-skill`)
+│                            — not the agent's own skills, which live in runtime/skills/
 ├── scripts/put-secrets.sh        manual/rotation path for any secret
 ├── slack-app-manifest.yaml       the by-hand fallback
 └── setup.md              ← start here

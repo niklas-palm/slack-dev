@@ -55,7 +55,7 @@ if [ -n "$PROMPT" ]; then
   echo "▸ POST /invoke"
   curl -s -X POST "http://localhost:$PORT/invoke" \
     -H 'content-type: application/json' \
-    -d "$(printf '{"sessionId":"local","prompt":%s}' "$(printf '%s' "$PROMPT" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')")"
+    -d "$(node -e 'process.stdout.write(JSON.stringify({sessionId:"local",prompt:process.argv[1]}))' "$PROMPT")"
   echo
   echo "▸ following the logs (ctrl-C to stop; the answer appears as an \"event\":\"text\" line)"
   docker logs -f "$NAME"

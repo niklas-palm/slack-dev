@@ -13,6 +13,7 @@ rules, and points at the deeper docs rather than repeating them.
 | [CONTRIBUTING.md](./CONTRIBUTING.md) | **Mandatory** before touching `runtime/src/slack-tools.ts` (the concurrency design), a runtime dependency (two lockfiles), or the build loops. |
 | [docs/lambda-microvms.md](./docs/lambda-microvms.md) | **Mandatory** before touching `infra/microvm/`, the Dockerfile, or anything calling the microVM API. |
 | [setup.md](./setup.md) | The operator's runbook — the sequence a user follows, and the troubleshooting table. |
+| [docs/iterating.md](./docs/iterating.md) | The two seams a user edits: `PROMPT.md` and `runtime/skills/`. Read before changing how either is loaded. |
 
 ---
 
@@ -42,8 +43,10 @@ yes, which of these did I update?
 - **[docs/](./docs/)** — deep subsystem detail. Verbose explanations belong HERE and are referenced from
   elsewhere, never inlined twice.
 - **`runtime/PROMPT.md`** — only the template, if the base prompt's contract changed.
-- **`~/.claude/skills/create-slack-dev/`** — the global skill that drives this sample. It has its own
-  `references/`; if a command, permission, or region changed, it changed there too.
+- **`skills/create-slack-dev/`** — the INSTALLER skill, which is how most people will set an agent up.
+  **The copy in this repo is the source of truth**; `~/.claude/skills/` is just an install of it, so edit
+  the repo and re-run `node skills/install.mjs`. If a command, permission or region changed, it changed
+  in the skill and its `references/` too.
 
 Then, before you call it done:
 
@@ -74,6 +77,7 @@ npm run setup:oidc # ONE-TIME, BY HAND: the GitHub OIDC deploy role for THIS rep
 npm run invoke     # one turn against a deployed VM
 npm run synth      # CDK template, no deploy
 npm run secrets    # store/rotate any secret in SSM
+node skills/install.mjs   # (re)install the create-slack-dev skill from this repo's copy
 ```
 
 **`npm run image` and `npm run deploy` are different jobs, and confusing them is the most common
@@ -108,6 +112,9 @@ Slack @mention → API Gateway → ingress Lambda        (verify HMAC · channel
 ```
 
 - `runtime/` — the agent. One image, which is both the microVM image and what `npm run docker` runs.
+- **Two different "skills"**, easy to confuse: `runtime/skills/` are the AGENT's skills, shipped in its
+  image and loaded on demand at run time. `skills/create-slack-dev/` is the INSTALLER skill a human's
+  coding agent reads to set all this up. Published as `npx slack-dev-skill`.
 - `infra/lib/stack.ts` — the whole stack. `infra/lambda/slack-events/` — the ingress and the microVM
   client. `infra/microvm/build.sh` — the image build (not CDK: CloudFormation has no resource type).
 - **Region is `eu-west-1`**, the only one Lambda MicroVMs exists in. Opus 5 is ACTIVE there too.
