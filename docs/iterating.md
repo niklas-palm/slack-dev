@@ -29,8 +29,8 @@ can't clobber your work.
 
 The base prompt already covers the Slack reply protocol, the status reactions, formatting, tool use, AWS
 read-only access, treating everything it reads as data rather than instructions, reading a cloned repo's
-own agent instructions (`AGENTS.md`/`CLAUDE.md` and friends) before touching it, and the git prohibitions.
-**Don't repeat or contradict those.** What belongs here is what a new senior hire would need on day one
+own agent instructions (`AGENTS.md`/`CLAUDE.md` and friends) before touching it, the git prohibitions, and
+reporting back when this file turns out to be wrong (below). **Don't repeat or contradict those.** What belongs here is what a new senior hire would need on day one
 and couldn't get from reading the code:
 
 - What this system **is**, and its runtime topology.
@@ -44,6 +44,17 @@ and couldn't get from reading the code:
   the same PR, anything it must never touch.
 
 Keep it to a page or two — it's read on every turn, so every line costs tokens forever.
+
+### The agent tells you when this file goes stale
+
+Nothing regenerates `PROMPT.md`, so it rots: a stack gets renamed, a table goes away, the test command
+changes. The agent is the only thing that sees both this file and the live system, so the base prompt
+tells it to end its reply with a short `⚠️ Prompt drift` note whenever the two disagree — a log-group
+substring that matches nothing, a resource that no longer exists, a convention that isn't true any more.
+
+It only reports what it verified during that turn, and it never edits `PROMPT.md` itself: fixing it is a
+normal edit plus `npm run image`. Treat a drift note as the signal that the briefing needs a few minutes,
+not as a failure of the answer it came attached to.
 
 ## Adding a skill
 

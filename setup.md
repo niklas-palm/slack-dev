@@ -144,7 +144,9 @@ access. Everything else is automated.
 - **The App name is globally unique across GitHub**, so the script checks it first and *stops* if it's
   taken rather than picking a variant for you — it's the identity on every PR the agent opens, so it
   should be your choice. Re-run with the name you want: `npm run github-app -- --app-name <name>`. It's
-  display-only and needn't match `agent.config.json`; it shows on PRs as `name[bot]`.
+  display-only and needn't match `agent.config.json`; it shows on PRs as `name[bot]`. To test a name
+  without running anything: `curl -so /dev/null -w '%{http_code}\n' https://github.com/apps/<slug>` —
+  `404` is free, `200` is taken.
 - **Re-running is blocked** while `gh-app-id` exists, so you can't silently orphan an App. Delete that
   parameter first if you really want a new one.
 - **The permissions it requests**, and why each: `contents: write` (clone, push branches),

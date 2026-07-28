@@ -81,6 +81,25 @@ the environment, so the user can keep them in their own shell. Step 7 makes this
    broken and a permissions mistake. If in a git repo: `git remote get-url origin`, then **confirm**.
 2. **`name`** — the agent's slug (lowercase, digits, hyphens). Derives the stack name, SSM prefix, and
    microVM image name, so several agents can share an account. Also the @handle people type.
+
+   **Check the name is available on GitHub before you settle on it.** The GitHub App is named after
+   `displayName`, and App names are unique across *all* of GitHub — so an obvious name like `dev-agent`
+   or `platform-bot` is usually taken. Discovering that at step 5 costs a re-run and two more clicks
+   each time, so check the candidates *here*, while you're still choosing:
+
+   ```bash
+   for n in <candidate> <candidate-2> <candidate-3>; do
+     slug="$(printf '%s' "$n" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]\+/-/g; s/^-*//; s/-*$//')"
+     printf '%-28s %s\n' "$n" \
+       "$(curl -so /dev/null -w '%{http_code}' "https://github.com/apps/${slug}" \
+          | sed 's/^404$/AVAILABLE/; s/^2[0-9][0-9]$/TAKEN/')"
+   done
+   ```
+
+   `404` means no App owns that slug → available. Anything `2xx` means taken. Offer the user the
+   available candidates and let them choose — the name is the bot's identity on every PR, so **never
+   pick or silently mangle it for them.** Distinctive names (product or team prefix, e.g.
+   `acme-checkout-agent`) are far likelier to be free than generic ones.
 3. **`allowedChannels`** — the Slack channel **ids** (`C0123ABCD`) it may answer in. **Always ask.**
    Empty means it answers in *any* channel it's invited to — in a large workspace, anyone who can
    `/invite` it could direct an agent holding repo push credentials. Tell them how to find an id: in
@@ -174,6 +193,10 @@ is, its runtime topology, where its logs live, and what the agent should lead wi
 Research it properly: read `references/prompt-research.md` for the checklist, the commands that inventory
 real infrastructure, and the two mistakes that make an agent useless in practice.
 
+Get the facts right rather than guessing at them: when the agent later finds that a log group, resource
+or convention you wrote here doesn't match the live system, it flags `⚠️ Prompt drift` in its Slack reply
+so the user knows to fix this file and re-run `npm run image`.
+
 ## Step 5 — Register the GitHub App *(user clicks twice)*
 
 ```bash
@@ -190,9 +213,10 @@ Tell the user what to expect *before* running it — it opens their browser and 
 check `node -v` — the build reads the config with node, so a broken node install surfaces as a config
 error. (It used to read it with python3, which macOS no longer bundles, producing exactly that confusion.)
 
-**If it exits with "name is already taken":** App names are unique across all of GitHub. Ask what they'd
-like instead — it's display-only and appears on PRs as `name[bot]` — then re-run with
-`-- --app-name <their choice>`. **Don't pick one for them**; it's the bot's identity on every PR.
+**If it exits with "name is already taken":** you skipped the availability check in step 1 — run it now
+for a couple of candidates, ask what they'd like instead (it's display-only and appears on PRs as
+`name[bot]`), then re-run with `-- --app-name <their choice>`. **Don't pick one for them**; it's the bot's
+identity on every PR.
 
 The App is scoped to **propose, never land**. If asked, `references/permissions.md` explains each grant.
 

@@ -21,7 +21,7 @@ point the user there.
 
 | Symptom | Cause and fix |
 |---|---|
-| `name is already taken` | App names are unique across all of GitHub. **Ask the user** what they'd prefer — it's the bot's identity on PRs — then re-run with `-- --app-name <choice>`. |
+| `name is already taken` | App names are unique across all of GitHub, so generic ones usually are. Check candidates before asking the user to click anything: `curl -so /dev/null -w '%{http_code}' https://github.com/apps/<slug>` → `404` is available, `2xx` is taken. **Ask the user** which free name they want — it's the bot's identity on PRs — then re-run with `-- --app-name <choice>`. |
 | `gh-app-id already exists` | An App is already registered for this agent. Re-running is blocked so you can't orphan one. Delete that SSM parameter only if the user confirms they want a new App. |
 | `"url" wasn't supplied` | A malformed manifest — GitHub reads `hook_attributes` as a webhook declaration whose `url` is required. The shipped manifest omits it entirely; don't add it back. |
 | The script exits after creating the App but before storing something | **Don't re-run** — it would create a second App. The script prints the exact `aws ssm put-parameter` command; follow that, or use `npm run secrets`. |

@@ -56,6 +56,16 @@ describe("the system prompt", () => {
     expect(prompt).toMatch(/Run anything that MUTATES state sequentially/);
   });
 
+  // PROMPT.md is hand-written and never regenerated, so it drifts from the system it describes. The
+  // agent is the only thing that sees both, which makes "say so when the briefing is wrong" the only
+  // drift alarm this design has.
+  it("tells the agent to report drift between its briefing and reality", () => {
+    expect(prompt).toMatch(/Report drift in your own briefing/);
+    expect(prompt).toMatch(/⚠️ Prompt drift/);
+    expect(prompt).toMatch(/Only report what you actually verified/);
+    expect(prompt).toMatch(/Report it, don't fix it/);
+  });
+
   it("appends the per-agent PROMPT.md", () => {
     expect(prompt).toMatch(/# This agent/);
   });
