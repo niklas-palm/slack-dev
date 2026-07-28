@@ -104,6 +104,10 @@ fi
 #
 # CDK itself doesn't use these credentials directly — it assumes the account's bootstrap roles, which is
 # why sts:AssumeRole on cdk-hnb659fds-* is the only broad grant here.
+#
+# lambda:PassNetworkConnector is needed at IMAGE-BUILD time, not just at run-microvm time:
+# CreateMicrovmImage validates the connectors the image will run with. It's a permission distinct from
+# CreateMicrovmImage, and it only ever fails on a real call — never at synth or in a dry run.
 POLICY=$(cat <<JSON
 {
   "Version": "2012-10-17",
@@ -114,6 +118,10 @@ POLICY=$(cat <<JSON
       "Action": ["lambda:CreateMicrovmImage", "lambda:UpdateMicrovmImage", "lambda:GetMicrovmImage",
                  "lambda:ListMicrovmImages", "lambda:ListMicrovmImageBuilds"],
       "Resource": "*" },
+    { "Sid": "PassNetworkConnectors", "Effect": "Allow",
+      "Action": "lambda:PassNetworkConnector",
+      "Resource": ["arn:aws:lambda:${REGION}:aws:network-connector:aws-network-connector:ALL_INGRESS",
+                   "arn:aws:lambda:${REGION}:aws:network-connector:aws-network-connector:INTERNET_EGRESS"] },
     { "Sid": "BuildArtifacts", "Effect": "Allow",
       "Action": ["s3:CreateBucket", "s3:PutBucketPublicAccessBlock", "s3:GetBucketLocation",
                  "s3:ListBucket", "s3:PutObject"],

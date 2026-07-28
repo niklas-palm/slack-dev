@@ -20,8 +20,8 @@
     "destroy": "npm run destroy -w infra",
     "secrets": "bash scripts/put-secrets.sh",
     "invoke": "npm run invoke -w infra",
-    "github-app": "npm run github-app -w slack-dev-infra",
-    "slack-app": "npm run slack-app -w slack-dev-infra",
+    "github-app": "tsx infra/scripts/create-github-app.ts",
+    "slack-app": "tsx infra/scripts/create-slack-app.ts",
     "docker": "bash scripts/run-local.sh"
   },
   "engines": {
