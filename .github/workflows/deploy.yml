@@ -81,6 +81,11 @@ jobs:
       # agent.config.json is gitignored so a FORK never inherits someone's channel ids or repo. This
       # repo deploys ITSELF, so its own config is committed separately and copied into place — visible
       # in git, reviewable in a diff, and it can't leak into a clone.
+      #
+      # FORKED THIS AND KEPT CI? Replace agent.config.ci.json with YOUR name, repo and channel ids. It's
+      # a complete, valid config for the TEMPLATE's agent, so nothing looks wrong and no placeholder
+      # guard fires — but you'd be deploying an agent pointed at someone else's Slack channel. (If your
+      # clone just runs an agent for another repo, delete this whole .github/ directory instead.)
       - name: Use this repo's own agent config
         run: cp agent.config.ci.json agent.config.json
 
