@@ -72,5 +72,14 @@ if [ -n "$PEM_PATH" ]; then
 fi
 
 echo
-echo "Done. The runtime reads these when a new session starts, so a rotated value takes effect on the"
-echo "next fresh Slack thread (or redeploy to force it)."
+cat <<NOTE
+Done. A rotation is not live everywhere at once:
+
+  new Slack threads    pick it up immediately
+  running threads      keep the OLD value for up to 8h — each microVM reads its secrets once
+  the ingress Lambda   caches per warm container, so redeploy to cycle the signing secret
+
+If you rotated because a credential LEAKED, revoke it at the source (Slack / GitHub) too, and terminate
+the live VMs — docs/lambda-microvms.md has the commands (CLI namespace \`aws lambda-microvms\`, not
+\`aws lambda\`).
+NOTE

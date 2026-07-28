@@ -142,7 +142,39 @@ Idle → suspended (billing stops for compute); traffic → auto-resume with mem
 than `suspendedDurationSeconds` → terminated. **A microVM bills until it is terminated or hits its max
 duration**, so terminate explicitly when you're done.
 
+**"Idle" means no INBOUND traffic through the proxy endpoint — nothing else.** The API's own words: *"Idle
+time is measured by inbound traffic through the MicroVM proxy endpoint — if no requests arrive within the
+configured duration, the MicroVM is suspended."* Not CPU, not an outbound HTTP call, not a running child
+process. So a VM working hard on a single request looks completely idle:
+
+> A turn takes one inbound request (`/invoke`) and can then run for many minutes — model round-trips, a
+> clone, a test suite. Cross `maxIdleDurationSeconds` and it is **suspended mid-flight**: the in-flight
+> socket and any child process freeze, and on the next mention they thaw into a dead connection. It
+> surfaces as a long silence followed by an error, which reads like a model problem rather than a
+> lifecycle one.
+
+There is no keep-alive from inside — the VM cannot generate inbound traffic to itself through the proxy.
+The mitigations are (a) set the idle window comfortably above your longest plausible request, and (b) log
+at the `suspend` hook when work is in flight, so the symptom is diagnosable. This project does both
+(`idleSessionTimeout` in `infra/lib/config.ts`; `suspended_mid_turn` in `runtime/src/server.ts`).
+
 Resources default to 2 GB / 1 vCPU; `--resources minimumMemoryInMiB=8192` gives 8 GB / 4 vCPU.
+
+### Listing and killing VMs by hand
+
+Note the CLI namespace — **`aws lambda-microvms`**, not `aws lambda`. The microVM API is a separate
+service model, so it doesn't appear under `aws lambda help` at all (nor in the JS SDK, which is why
+`infra/lambda/slack-events/microvm.ts` signs its own requests).
+
+```bash
+aws lambda-microvms list-microvms --region eu-west-1 \
+  --query 'items[?state!=`TERMINATED`].[microvmId,state]' --output text
+aws lambda-microvms terminate-microvm --microvm-identifier <id> --region eu-west-1
+```
+
+The response field is `items`, and the terminate flag is `--microvm-identifier` (not `--microvm-id`).
+Reach for this after rotating a leaked secret — a running VM holds the old value in memory for its whole
+life — or to stop a VM billing before its 8h ceiling.
 
 ## No session routing, no tags
 

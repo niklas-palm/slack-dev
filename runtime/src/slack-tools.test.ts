@@ -25,7 +25,7 @@ type Invokable = {
 // edited every time an internal field changed — including fields no test here reads.
 const { SLACK_TOOLS, newSlackTurn, isWaiting } =
   await import("./slack-tools.js");
-const { asSlackTarget, STATUS_EMOJI } = await import("./slack.js");
+const { alsoReactTo, asSlackTarget, setThreadStatus, STATUS_EMOJI } = await import("./slack.js");
 type SlackTurn = ReturnType<typeof newSlackTurn>;
 
 const byName = new Map(
@@ -193,6 +193,40 @@ describe("set_thread_status", () => {
     expect(removed).toContain(STATUS_EMOJI.failed);
     expect(removed).not.toContain(STATUS_EMOJI.done);
     expect(added).toEqual([STATUS_EMOJI.done, STATUS_EMOJI.done]); // parent + trigger message
+  });
+
+  // Mentions that arrive mid-turn are folded into it, and each already carries a 👀 from the ingress. The
+  // terminal reaction has to reach them too, or the person who corrected the agent watches a bare 👀
+  // while the turn they joined goes 🟢 on someone else's message.
+  it("reacts to messages injected into the turn as well", async () => {
+    const target = asSlackTarget({ channel_id: "C1", thread_ts: "100.0", trigger_message_ts: "101.0" })!;
+    alsoReactTo(target, "102.0");
+    calls = [];
+
+    expect(await setThreadStatus(target, "done")).toBe(true);
+    const reacted = calls.filter(([m]) => m === "reactions.add").map(([, b]) => b.timestamp);
+    expect(reacted).toEqual(["100.0", "101.0", "102.0"]);
+  });
+
+  // A courtesy reaction on an injected message is not the turn's outcome. Reporting false made the
+  // runtime warn "I may not have finished everything" under a turn that succeeded, and whose own
+  // messages were marked correctly.
+  it("still reports success when only an injected message's reaction fails", async () => {
+    const target = asSlackTarget({ channel_id: "C1", thread_ts: "100.0", trigger_message_ts: "101.0" })!;
+    alsoReactTo(target, "102.0");
+    calls = [];
+    // 4 calls per timestamp (3 removes + 1 add); fail only the third timestamp's add.
+    responses = [...Array(11).fill({ ok: true }), { ok: false, error: "ratelimited" }];
+
+    expect(await setThreadStatus(target, "done")).toBe(true);
+  });
+
+  it("reports failure when the turn's OWN message can't be marked", async () => {
+    const target = asSlackTarget({ channel_id: "C1", thread_ts: "100.0", trigger_message_ts: "101.0" })!;
+    calls = [];
+    responses = [...Array(3).fill({ ok: true }), { ok: false, error: "ratelimited" }];
+
+    expect(await setThreadStatus(target, "done")).toBe(false);
   });
 
   it("never touches the 👀 acknowledgement", async () => {

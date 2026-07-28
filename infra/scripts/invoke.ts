@@ -20,7 +20,9 @@ import {
   runMicrovm,
   terminateMicrovm,
 } from "../lambda/slack-events/microvm.js";
-import { arg, requireConfig } from "./cli.js";
+import { arg, rejectUnknownFlags, requireConfig } from "./cli.js";
+
+rejectUnknownFlags(["prompt", "keep"]);
 
 const prompt = arg("prompt");
 if (!prompt) {

@@ -29,9 +29,44 @@ export interface SlackTarget {
   thread_ts: string;
   trigger_message_ts?: string;
   slack_user_id?: string;
+  /**
+   * Later mentions folded into this same turn (see deliver() in agent.ts). Each one got a 👀 from the
+   * ingress, so each needs the terminal reaction too — otherwise a correction sits on a bare 👀 while the
+   * turn it joined goes 🟢 on the first message, and the person who corrected it sees no acknowledgement.
+   */
+  alsoReactTo?: string[];
 }
 
-/** Narrow an unknown payload field to a usable target — a malformed one must not break the turn. */
+/** The status the runtime reports when it has no bot token, in both places that can detect it. */
+export const NO_BOT_TOKEN = "SLACK_BOT_TOKEN unavailable";
+
+/**
+ * How many injected messages one turn will react to.
+ *
+ * BOUNDED on purpose. `setThreadStatus` reacts to every timestamp on every status change (4 Slack calls
+ * each, looped serially), so the list is a multiplier on both latency and rate-limit pressure — and
+ * `/terminate` has a hard, unraisable 60s budget it has to fit in. Reactions are also the least important
+ * thing here: the injected message is answered in the same thread either way. Keep the most RECENT ones,
+ * since the newest correction is the one someone is waiting on.
+ */
+const MAX_ALSO_REACT = 4;
+
+/**
+ * Fold a later mention's trigger message into an already-running turn's target, so the terminal reaction
+ * lands on it too. De-duplicated (a mention can be delivered twice) and capped — see MAX_ALSO_REACT.
+ */
+export function alsoReactTo(target: SlackTarget, ts: string): void {
+  const next = [...new Set([...(target.alsoReactTo ?? []), ts])];
+  if (next.length > MAX_ALSO_REACT) {
+    emit("also_react_capped", { dropped: next.length - MAX_ALSO_REACT, cap: MAX_ALSO_REACT });
+  }
+  target.alsoReactTo = next.slice(-MAX_ALSO_REACT);
+}
+
+/**
+ * Narrow an unknown payload field to a usable target — a malformed one must not break the turn.
+ * `alsoReactTo` is deliberately NOT read from the payload: it's runtime-internal state, never wire input.
+ */
 export function asSlackTarget(value: unknown): SlackTarget | undefined {
   if (typeof value !== "object" || value === null) return undefined;
   const v = value as Record<string, unknown>;
@@ -93,10 +128,16 @@ export async function slackCall(
  * runtime's own calls (server.ts) are strictly before or after the model runs. So no two can overlap.
  */
 export async function setThreadStatus(target: SlackTarget, status: ThreadStatus): Promise<boolean> {
-  const timestamps = [...new Set([target.thread_ts, target.trigger_message_ts].filter((t): t is string => Boolean(t)))];
+  // The turn's OWN messages — the thread and the mention that started it. The return value speaks for
+  // these only.
+  const own = [...new Set([target.thread_ts, target.trigger_message_ts].filter((t): t is string => Boolean(t)))];
+  // Plus courtesy reactions on mentions folded into this turn. A rate limit on one of THOSE must not
+  // report the status as failed: the caller turns a false into "I may not have finished everything",
+  // which is a confusing warning under a turn that succeeded and is correctly marked on its own message.
+  const timestamps = [...new Set([...own, ...(target.alsoReactTo ?? [])])];
   let ok = true;
 
-  for (const timestamp of timestamps) {
+  for (const [index, timestamp] of timestamps.entries()) {
     // The three removes are independent, so run them together — sequentially they were 3× the
     // latency on the path that blocks the start of every turn.
     const stale = Object.entries(STATUS_EMOJI).filter(([name]) => name !== status);
@@ -112,8 +153,8 @@ export async function setThreadStatus(target: SlackTarget, status: ThreadStatus)
 
     const added = await slackCall("reactions.add", { body: { channel: target.channel_id, timestamp, name: STATUS_EMOJI[status] } });
     if (!added.ok && !["already_reacted"].includes(added.error ?? "")) {
-      ok = false;
-      emit("slack_status_warning", { method: "reactions.add", status, error: added.error });
+      if (index < own.length) ok = false;
+      emit("slack_status_warning", { method: "reactions.add", status, error: added.error, timestamp });
     }
   }
 

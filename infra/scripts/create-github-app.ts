@@ -22,10 +22,12 @@ import { createSign } from "node:crypto";
 import { GetParameterCommand, PutParameterCommand, SSMClient } from "@aws-sdk/client-ssm";
 
 import { REGION } from "../lib/config.js";
-import { arg, openBrowser, requireConfig } from "./cli.js";
+import { arg, openBrowser, requireConfig, rejectUnknownFlags } from "./cli.js";
 
 const PORT = 8724; // arbitrary, only needs to be free for a minute
 const REDIRECT = `http://localhost:${PORT}/callback`;
+
+rejectUnknownFlags(["org", "app-name"]);
 
 const agent = requireConfig();
 const org = arg("org");

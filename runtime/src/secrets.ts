@@ -15,7 +15,13 @@ import { REGION } from "./config.js";
 
 const ssm = new SSMClient({ region: REGION });
 
-export async function loadSecretsFromSsm(): Promise<void> {
+/**
+ * Load every `FOO_PARAM` into `FOO`. Returns the targets that did NOT resolve, so a caller can tell
+ * "read fine" from "SSM was down" — a per-parameter failure is swallowed here on purpose (a missing
+ * GitHub key shouldn't stop the VM booting), which otherwise makes the two indistinguishable.
+ */
+export async function loadSecretsFromSsm(): Promise<string[]> {
+  const failed: string[] = [];
   const paramVars = Object.keys(process.env).filter((k) => k.endsWith("_PARAM"));
   await Promise.all(
     paramVars.map(async (paramVar) => {
@@ -27,14 +33,19 @@ export async function loadSecretsFromSsm(): Promise<void> {
         const r = await ssm.send(new GetParameterCommand({ Name: name, WithDecryption: true }));
         const value = r.Parameter?.Value;
         if (value) process.env[target] = value;
-        else console.error(`[secrets] SSM parameter ${name} (for ${target}) is empty`);
+        else {
+          failed.push(target);
+          console.error(`[secrets] SSM parameter ${name} (for ${target}) is empty`);
+        }
       } catch (e) {
         // Don't crash the runtime: let the failure surface where the credential is used (a Slack tool
         // returning `not_authed`, or the github skill's token mint returning 401), which is more
         // debuggable than a container that won't boot. SLACK_BOT_TOKEN is the exception — server.ts
         // checks it at boot, because without it the agent can't report any failure at all.
+        failed.push(target);
         console.error(`[secrets] failed to load ${target} from ${name}:`, e instanceof Error ? e.message : e);
       }
     }),
   );
+  return failed;
 }

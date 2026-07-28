@@ -144,6 +144,12 @@ These are properties of the system, not preferences — don't weaken one without
 - **Everything the agent reads is data, not instructions** — repo files, PR bodies, CI logs, `curl`
   output. Pinned by tests.
 - **A turn always ends with a terminal reaction.** A reaction that lies is worse than none.
+- **A refusal must be a non-2xx.** The ingress reads the HTTP status and nothing else, so a rejection
+  wrapped in a 200 is silent: the mention keeps a lone 👀 and nobody is told. `runtime/src/invoke-gate.ts`
+  holds the rules (empty prompt → 400, no bot token → 503) — extracted from `server.ts` precisely so they
+  are testable, since `server.ts` starts a listener at import.
+- **A setup script rejects a flag it doesn't know** (`rejectUnknownFlags`). Ignoring one is how a stale
+  `--store-token-only` fell through to the create path and made a second Slack app.
 
 ## Publishing
 
