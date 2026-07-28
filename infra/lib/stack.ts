@@ -26,6 +26,7 @@ import {
   RemovalPolicy,
   Stack,
   type StackProps,
+  Tags,
 } from "aws-cdk-lib";
 import {
   AuthorizationType,
@@ -329,5 +330,17 @@ export class SlackDevStack extends Stack {
       value: agent.ssmPrefix,
       description: "Where this agent's secrets and its image ARN live.",
     });
+
+    // --- Tags ---------------------------------------------------------------
+
+    // Cost allocation and inventory. Applied once at the top and inherited by everything in the
+    // stack — the table, the function, its log group, the API, the roles — because one account may
+    // host several agents and the resource names are all CloudFormation-generated.
+    //
+    // WANT ANOTHER TAG? Add it here AND in infra/microvm/build.sh. The microVM image and the shared
+    // build resources are created by the CLI (CloudFormation has no MicroVM resource type), so they
+    // inherit nothing from this stack — a tag added in only one place sees half a deployment.
+    Tags.of(this).add("project", "slack-dev");
+    Tags.of(this).add("agent", agent.name);
   }
 }

@@ -100,7 +100,8 @@ else
   echo "▸ creating ${ROLE} (repo: ${REPO}, main only)"
   aws iam create-role --role-name "$ROLE" \
     --description "GitHub Actions deploys for ${REPO} (keyless OIDC, main branch only)." \
-    --assume-role-policy-document "$TRUST" >/dev/null
+    --assume-role-policy-document "$TRUST" \
+    --tags Key=project,Value=slack-dev >/dev/null
 fi
 
 # What a deploy needs, and nothing more.
@@ -116,6 +117,10 @@ fi
 # lambda:PassNetworkConnector is needed at IMAGE-BUILD time, not just at run-microvm time:
 # CreateMicrovmImage validates the connectors the image will run with. It's a permission distinct from
 # CreateMicrovmImage, and it only ever fails on a real call — never at synth or in a dry run.
+#
+# The three tagging grants (lambda:TagResource, s3:PutBucketTagging, iam:TagRole) are what lets a CI
+# deploy tag the resources CloudFormation doesn't own — see infra/microvm/build.sh. An install created
+# before they existed must re-run this script; until then a deploy still succeeds, it just warns.
 POLICY=$(cat <<JSON
 {
   "Version": "2012-10-17",
@@ -124,19 +129,19 @@ POLICY=$(cat <<JSON
       "Resource": "arn:aws:iam::${ACCT}:role/cdk-hnb659fds-*-${ACCT}-*" },
     { "Sid": "MicrovmImage", "Effect": "Allow",
       "Action": ["lambda:CreateMicrovmImage", "lambda:UpdateMicrovmImage", "lambda:GetMicrovmImage",
-                 "lambda:ListMicrovmImages", "lambda:ListMicrovmImageBuilds"],
+                 "lambda:ListMicrovmImages", "lambda:ListMicrovmImageBuilds", "lambda:TagResource"],
       "Resource": "*" },
     { "Sid": "PassNetworkConnectors", "Effect": "Allow",
       "Action": "lambda:PassNetworkConnector",
       "Resource": ["arn:aws:lambda:${REGION}:aws:network-connector:aws-network-connector:ALL_INGRESS",
                    "arn:aws:lambda:${REGION}:aws:network-connector:aws-network-connector:INTERNET_EGRESS"] },
     { "Sid": "BuildArtifacts", "Effect": "Allow",
-      "Action": ["s3:CreateBucket", "s3:PutBucketPublicAccessBlock", "s3:GetBucketLocation",
-                 "s3:ListBucket", "s3:PutObject"],
+      "Action": ["s3:CreateBucket", "s3:PutBucketPublicAccessBlock", "s3:PutBucketTagging",
+                 "s3:GetBucketLocation", "s3:ListBucket", "s3:PutObject"],
       "Resource": ["arn:aws:s3:::slack-dev-microvm-${ACCT}-${REGION}",
                    "arn:aws:s3:::slack-dev-microvm-${ACCT}-${REGION}/*"] },
     { "Sid": "ImageBuildRoleOnly", "Effect": "Allow",
-      "Action": ["iam:GetRole", "iam:CreateRole", "iam:PutRolePolicy", "iam:PassRole"],
+      "Action": ["iam:GetRole", "iam:CreateRole", "iam:PutRolePolicy", "iam:PassRole", "iam:TagRole"],
       "Resource": "arn:aws:iam::${ACCT}:role/SlackDevMicrovmBuildRole" },
     { "Sid": "PublishImageArnOnly", "Effect": "Allow",
       "Action": ["ssm:PutParameter", "ssm:AddTagsToResource"],

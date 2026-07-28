@@ -87,6 +87,28 @@ describe("the stack", () => {
     ).toBeGreaterThanOrEqual(1);
   });
 
+  it("tags every taggable resource with the project and the agent — cost allocation", () => {
+    const { template } = synth({ name: "alpha" });
+    // Applied once at the stack (infra/lib/stack.ts) and inherited, so a new resource is covered
+    // without anyone remembering to tag it. Checked on the table and the log group specifically: they
+    // carry cost and have CloudFormation-generated names, so a tag is the only way to attribute either.
+    for (const type of ["AWS::DynamoDB::Table", "AWS::Logs::LogGroup"]) {
+      for (const [id, resource] of Object.entries(
+        template.findResources(type),
+      )) {
+        expect(
+          resource.Properties?.Tags,
+          `${type} ${id} must be tagged`,
+        ).toEqual(
+          expect.arrayContaining([
+            { Key: "project", Value: "slack-dev" },
+            { Key: "agent", Value: "alpha" },
+          ]),
+        );
+      }
+    }
+  });
+
   it("leaves every physical resource name to CloudFormation — multi-deploy safety", () => {
     const { template } = synth();
     // Properties that pin a physical name. Any of these set to a constant would make a SECOND

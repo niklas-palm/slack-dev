@@ -132,6 +132,10 @@ Slack @mention → API Gateway → ingress Lambda        (verify HMAC · channel
   ids and internal repo names shouldn't travel with a fork.
 - **Secrets are SSM parameter *paths* in code, never values.** Nothing secret enters a CloudFormation
   template, a log line, or a command argument. Never echo a token, even partially.
+- **Tags live in TWO places, and a new one goes in both.** `project=slack-dev` and `agent=<name>` are
+  applied at the top of `infra/lib/stack.ts` for everything CloudFormation owns, and by hand in
+  `infra/microvm/build.sh` for the microVM image and the shared build resources, which it doesn't own.
+  See [README](./README.md#tags) — a tag added in one place describes half a deployment.
 
 ## Guardrails that are load-bearing
 

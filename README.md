@@ -188,6 +188,26 @@ credentials. Two controls bound who that is:
 
 Harden command execution before pointing this at untrusted users.
 
+## Tags
+
+Every deployment carries two tags, so an account hosting several agents stays filterable in Cost
+Explorer, the tag editor and a resource group:
+
+```text
+project = slack-dev        agent = <agent.config.json name>
+```
+
+Applied once at the top of the stack (`infra/lib/stack.ts`) and inherited by everything CloudFormation
+owns — the DynamoDB table, the ingress Lambda and its log group, the API, the roles.
+`infra/microvm/build.sh` tags what CloudFormation *doesn't*: the microVM image gets both, while the
+shared build bucket and build role (and the CI deploy role) get `project` only, since they serve every
+agent in the account.
+
+**Want more tags — `env`, `owner`, a cost centre? Add them in BOTH places**, `infra/lib/stack.ts` and
+`infra/microvm/build.sh`; a tag added in one describes half a deployment. Two things can't be tagged: a
+*running* microVM (`RunMicrovm` takes no tags, so that compute lands untagged) and Bedrock usage. SSM
+parameters are left alone — they cost nothing and their path already names the agent.
+
 ## Layout
 
 ```text

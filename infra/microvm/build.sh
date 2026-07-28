@@ -38,6 +38,13 @@ BUCKET="slack-dev-microvm-${ACCT}-${REGION}"
 BUILD_ROLE="arn:aws:iam::${ACCT}:role/SlackDevMicrovmBuildRole"
 SSM_PARAM="/slack-dev/${NAME}/microvm-image-arn"
 
+# Cost allocation, the same pair the stack applies (infra/lib/stack.ts). Everything below is created by
+# the CLI rather than CloudFormation, so it inherits nothing and has to be tagged by hand.
+#
+# The shared, account-level resources get `project` only: they serve every agent in the account, so no
+# single `agent` value would be true. WANT ANOTHER TAG? Add it in both places.
+AGENT_TAGS="project=slack-dev,agent=${NAME}"
+
 # The artifacts bucket and the build role are account-level, shared by every agent — create once.
 if ! aws s3api head-bucket --bucket "$BUCKET" --region "$REGION" 2>/dev/null; then
   echo "▸ creating the artifacts bucket $BUCKET"
@@ -47,13 +54,16 @@ if ! aws s3api head-bucket --bucket "$BUCKET" --region "$REGION" 2>/dev/null; th
   aws s3api put-public-access-block --bucket "$BUCKET" --region "$REGION" \
     --public-access-block-configuration \
     "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true" >/dev/null
+  aws s3api put-bucket-tagging --bucket "$BUCKET" --region "$REGION" \
+    --tagging 'TagSet=[{Key=project,Value=slack-dev}]' >/dev/null
 fi
 
 if ! aws iam get-role --role-name SlackDevMicrovmBuildRole >/dev/null 2>&1; then
   echo "▸ creating the image-build role"
   aws iam create-role --role-name SlackDevMicrovmBuildRole \
     --description "Lets the Lambda MicroVM image builder read slack-dev build artifacts from S3." \
-    --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":["sts:AssumeRole","sts:TagSession"]}]}' >/dev/null
+    --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":["sts:AssumeRole","sts:TagSession"]}]}' \
+    --tags Key=project,Value=slack-dev >/dev/null
 fi
 # Reconciled every run (idempotent), so a bucket added later is covered.
 aws iam put-role-policy --role-name SlackDevMicrovmBuildRole --policy-name read-artifacts \
@@ -136,6 +146,13 @@ for _ in $(seq 1 120); do
       aws ssm put-parameter --name "$SSM_PARAM" --value "$IMAGE_ARN" --type String --overwrite \
         --region "$REGION" >/dev/null
       echo "▸ image ARN → $SSM_PARAM"
+      # Tagged AFTER publishing, and non-fatal: an image that runs matters more than one that is
+      # filterable, and this is the only call here needing lambda:TagResource — an older deploy role
+      # (scripts/setup-github-oidc.sh) doesn't have it yet. `tags` on create-microvm-image would cover
+      # the first build only; this one call reconciles every build, including images made before this.
+      aws lambda-microvms tag-resource --resource "$IMAGE_ARN" --tags "$AGENT_TAGS" \
+        --region "$REGION" >/dev/null ||
+        echo "⚠ could not tag $IMAGE_NAME (needs lambda:TagResource) — re-run npm run setup:oidc" >&2
       exit 0 ;;
     CREATE_FAILED | UPDATE_FAILED)
       echo "✗ the image build FAILED ($STATE). The build log names the failing Dockerfile step:" >&2

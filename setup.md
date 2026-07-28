@@ -420,6 +420,10 @@ Two things worth knowing:
   `kms:Decrypt`). A compromised workflow can redeploy the agent; it can't exfiltrate a Slack token or a
   GitHub private key.
 
+**Already have a deploy role?** Re-run `npm run setup:oidc` (it's idempotent) to pick up the tagging
+permissions CI needs for the resources CloudFormation doesn't own — see [Tags](./README.md#tags).
+Without them a deploy still succeeds; it just prints `⚠ could not tag …`.
+
 ## Adding a second agent
 
 Clone this repo again, give it a different `name` in `agent.config.json`, create its own Slack and
