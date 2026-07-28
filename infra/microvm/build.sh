@@ -16,7 +16,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
-REGION=eu-west-1 # the only region Lambda MicroVMs is available in
+REGION=eu-west-1 # MicroVMs exists only here and in us-east-1; keep in sync with infra/lib/config.ts
 
 # Read the agent's name from its config, the same source CDK uses.
 # Read config with NODE, not python3: node is already a hard prerequisite, and python3 isn't bundled with

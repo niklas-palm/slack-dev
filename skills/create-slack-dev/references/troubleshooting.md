@@ -46,7 +46,7 @@ point the user there.
 | The agent never answers, and the Lambda logs show no `[route]` line | The image ARN isn't in SSM — run `npm run image`. The stack routes to an image it doesn't build. |
 | `already exists` on a named resource | Another agent used the same `name` in this account, or a previous stack wasn't cleaned up. Pick a different `name`. |
 | `npm run invoke` says no image ARN | `npm run image` hasn't run for this agent, or it failed. It publishes the ARN both scripts read. |
-| `refuses to deploy outside eu-west-1` | Intentional — it's the only region Lambda MicroVMs exists in. Don't override it. |
+| `refuses to deploy outside eu-west-1` | Intentional. MicroVMs exists only in `eu-west-1` and `us-east-1`, and the template is pinned to `eu-west-1` — don't override the guard from the CLI. To actually run in `us-east-1`, change the pinned constants (SKILL.md "Region: only two are possible"), `MODEL_ID` included. |
 | Deploy succeeds but `npm run invoke` gets nothing | Check the microVM log group for a boot failure. `grep ALERT` catches a missing `SLACK_BOT_TOKEN`, which the agent cannot report itself. A VM that terminates within a second of launch usually means its execution role was just created — IAM propagation, so retry. |
 
 ## After handoff, from the first live run

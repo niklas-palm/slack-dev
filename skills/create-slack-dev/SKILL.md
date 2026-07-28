@@ -24,13 +24,43 @@ and reasons about a repo, reads PR comments and CI logs, and opens PRs — reply
 
 ```
 TEMPLATE: https://github.com/niklas-palm/slack-dev
-REGION:   eu-west-1         (the only Lambda MicroVM region; Opus 5 is ACTIVE there too)
+REGION:   eu-west-1         (default; us-east-1 is the only other option — see below)
 MODEL:    eu.anthropic.claude-opus-5
 ```
 
 **Template source.** Clone the public repo above. If it's unreachable, fall back to a local checkout and
 say which source you used. Each agent is a **separate clone** with its own `agent.config.json` — never
 deploy from the template checkout itself.
+
+## Region: only two are possible
+
+**Lambda MicroVMs exists in exactly two regions today: `eu-west-1` (the EU one) and `us-east-1` (the US
+one).** Nowhere else — every other region fails with `AccessDeniedException` on
+`ListManagedMicrovmImages`, and it fails *minutes into the image build*, after the S3 bucket and IAM
+build role already exist. So never "helpfully" deploy into the user's usual region.
+
+The template ships pinned to `eu-west-1`, and the stack throws if you try to deploy it elsewhere — that
+guard is deliberate, not a bug to route around. **If the user's workload and team are in the US, ask
+whether they want `us-east-1`, and switch the pins properly before step 6:**
+
+| Change | To |
+|---|---|
+| `infra/lib/config.ts` → `REGION` | `us-east-1` |
+| `runtime/src/config.ts` → `REGION` | `us-east-1` |
+| `runtime/src/config.ts` → `MODEL_ID` | `us.anthropic.claude-opus-5` |
+| `infra/microvm/build.sh` → `REGION` | `us-east-1` |
+| `scripts/put-secrets.sh`, `scripts/setup-github-oidc.sh` → `REGION` | `us-east-1` |
+| `infra/test/stack.test.ts` — the guard test pins the region by name | `us-east-1` (and its counter-example to a non-MicroVM region) |
+| every `--region eu-west-1` in commands you run, and in `setup.md` | `us-east-1` |
+
+**The model id prefix is regional, and this is the easy one to miss:** `eu.anthropic.claude-opus-5` does
+not resolve in `us-east-1` — it's `us.anthropic.claude-opus-5` there (verified: both inference profiles
+exist, each only in its own region). A region switch that forgets `MODEL_ID` deploys fine and then every
+turn fails at the first model call.
+
+Then confirm the model is enabled in the new region (the step-2 Bedrock command with the region swapped)
+and re-run `npm run check`. **Don't half-migrate** — a stack in one region with an image built in the
+other fails late and confusingly. If you're not switching, say nothing and stay in `eu-west-1`.
 
 ## Already have one? Start here instead
 
@@ -129,6 +159,7 @@ aws lambda-microvms help >/dev/null && echo "aws cli new enough"
 env -u AWS_PROFILE aws bedrock list-inference-profiles --region eu-west-1 \
   --query "inferenceProfileSummaries[?inferenceProfileId=='eu.anthropic.claude-opus-5'].status" --output text
 # → ACTIVE. Anything else: the user must enable Opus 5 in the Bedrock console for eu-west-1.
+# Deploying in us-east-1 instead? Swap BOTH the region and the prefix: 'us.anthropic.claude-opus-5'.
 env -u AWS_PROFILE aws cloudformation describe-stacks --stack-name CDKToolkit \
   --region eu-west-1 --query 'Stacks[0].StackStatus' --output text
 # Not found → bootstrap once, BEFORE deploying:

@@ -8,12 +8,14 @@ import { resolve } from "node:path";
 
 // --- 1. Invariants ---------------------------------------------------------
 
-/** Everything lives in eu-west-1 — the only region Lambda MicroVMs is available in, and Opus 5 is
- *  ACTIVE there too, so compute and model share one region. Deliberately NOT read from AWS_REGION
- *  (a stale shell value must not be able to misroute a call). See docs/lambda-microvms.md. */
+/** Everything lives in eu-west-1. MicroVMs exists only there and in us-east-1, and Opus 5 is ACTIVE in
+ *  eu-west-1, so compute and model share one region. Deliberately NOT read from AWS_REGION (a stale
+ *  shell value must not be able to misroute a call). See docs/lambda-microvms.md. */
 export const REGION = "eu-west-1";
 
-/** The only model this agent runs. One model, no per-task routing — that's the whole point. */
+/** The only model this agent runs. One model, no per-task routing — that's the whole point. The `eu.`
+ *  prefix is a REGIONAL inference profile: in us-east-1 this must be `us.anthropic.claude-opus-5`, so a
+ *  region change that forgets this line deploys cleanly and fails at the first model call. */
 export const MODEL_ID = "eu.anthropic.claude-opus-5";
 
 /** Ceiling on ONE model response's output tokens (BedrockModel.maxTokens). */
