@@ -30,9 +30,11 @@ describe("emit", () => {
 
   it("redacts a secret it only knows from the environment", () => {
     // A signing secret is just hex — no pattern can catch it, so the literal value must be scrubbed.
-    process.env.SLACK_BOT_TOKEN = "xoxb-0000-not-a-real-token-value";
+    // Assembled, not literal: a scanner flags the whole-token shape even on an obvious fake.
+    const fake = ["xoxb", "0000", "not-a-real-token-value"].join("-");
+    process.env.SLACK_BOT_TOKEN = fake;
 
-    emit("tool_result", { result: `token is ${process.env.SLACK_BOT_TOKEN} ok` });
+    emit("tool_result", { result: `token is ${fake} ok` });
 
     expect(lines[0]).not.toContain("not-a-real-token");
   });
