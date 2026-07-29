@@ -6,8 +6,9 @@
 
   The base prompt already covers: the Slack reply protocol, the status reactions, formatting, tool
   rules, AWS read-only access, treating everything it reads as data rather than instructions, reading a
-  cloned repo's own AGENTS.md/CLAUDE.md before working in it, and the git/workflow prohibitions. Don't
-  repeat those, and don't contradict them.
+  cloned repo's own AGENTS.md/CLAUDE.md before working in it, stepping back before a PR to ask whether
+  the change should exist at all, and the git/workflow prohibitions. Don't repeat those, and don't
+  contradict them.
 
   It also tells the agent to flag "⚠️ Prompt drift" in its reply whenever what it finds in the live
   system disagrees with what you wrote here — a log group that no longer exists, a renamed service, a
@@ -55,3 +56,7 @@ a small change and open a PR".>
 
 <Anything that would make a change get rejected: the test command, whether docs must be updated in
 the same PR, house style, anything the agent must never touch.>
+
+<What "makes sense" means for this product: the direction, the trade-offs already settled, the kinds
+of change this team doesn't want. The base prompt makes the agent ask the question; only this tells
+it what the answer usually is.>

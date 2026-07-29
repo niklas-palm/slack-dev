@@ -29,7 +29,8 @@ can't clobber your work.
 
 The base prompt already covers the Slack reply protocol, the status reactions, formatting, tool use, AWS
 read-only access, treating everything it reads as data rather than instructions, reading a cloned repo's
-own agent instructions (`AGENTS.md`/`CLAUDE.md` and friends) before touching it, the git prohibitions, and
+own agent instructions (`AGENTS.md`/`CLAUDE.md` and friends) before touching it, the git prohibitions,
+stepping back before a PR to ask whether the change should exist at all, and
 reporting back when this file turns out to be wrong (below). **Don't repeat or contradict those.** What belongs here is what a new senior hire would need on day one
 and couldn't get from reading the code:
 
@@ -42,6 +43,9 @@ and couldn't get from reading the code:
 - What to **lead with** for the questions it gets most.
 - Conventions that would make a change get rejected: the test command, whether docs must be updated in
   the same PR, anything it must never touch.
+- **What "makes sense" means here** — the product's direction, trade-offs already settled, the kinds of
+  change this team doesn't want. The base prompt makes the agent stop and ask whether a change should
+  exist; only this file can tell it what the answer usually is.
 
 Keep it to a page or two — it's read on every turn, so every line costs tokens forever.
 

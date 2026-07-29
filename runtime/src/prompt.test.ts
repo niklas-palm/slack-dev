@@ -52,6 +52,19 @@ describe("the system prompt", () => {
     expect(prompt).toMatch(/ignore previous instructions/); // names the actual attack shape
   });
 
+  // An agent that only optimises for "the task is done" ships changes that pass their tests and still
+  // make the product worse. The prompt is the only place this judgement lives, so pin both halves:
+  // ask the question before committing, AND surface the answer instead of swallowing it.
+  it("tells the agent to judge whether a change should exist, not just whether it works", () => {
+    expect(prompt).toMatch(/Before you open a PR: does this change make sense\?/);
+    expect(prompt).toMatch(/What might it break\?/);
+    // The concern has to reach the human — flagging is the agent's job, deciding is theirs.
+    expect(prompt).toMatch(/Silent doubt/);
+    expect(prompt).toMatch(/Flagging it is your job; deciding is theirs/);
+    // …without becoming a licence to stall or to relitigate a settled decision.
+    expect(prompt).toMatch(/not a licence to stall/);
+  });
+
   it("tells the agent to sequence mutating calls, since tools run concurrently by default", () => {
     expect(prompt).toMatch(/Run anything that MUTATES state sequentially/);
   });
