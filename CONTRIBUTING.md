@@ -27,6 +27,15 @@ Three things here will cost you real time if you don't read them first: the conc
 `runtime/src/slack-tools.ts`, the two lockfiles, and which of the build loops catches which class of bug.
 The first two encode bugs that were expensive to find.
 
+## Before changing run_bash
+
+**stdin is `/dev/null`, deliberately.** There is no interactive user, so a default stdin pipe is one
+nobody ever writes to or closes — and any program that reads stdin when it isn't a TTY then blocks until
+the timeout kills it. That is not a rare shape: `rg PATTERN` with no path argument, a bare `grep`, `cat`,
+`sort`, and **any pipeline whose last stage reads stdin**. It cost a real session 120 seconds — 23% of the
+turn — on `ls && rg -n "…" -l`, which returned `exit_code: -1` and sent the agent off to read whole files
+instead. Two tests in `tools.test.ts` pin it.
+
 ## Before changing the Slack tools
 
 The agent's tools run **concurrently** (the SDK default, and deliberately — see below), so two can touch
