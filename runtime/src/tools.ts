@@ -21,7 +21,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, extname, join, resolve } from "node:path";
+import { dirname, extname, join, relative, resolve } from "node:path";
 
 import { BedrockRuntimeClient, ConverseCommand } from "@aws-sdk/client-bedrock-runtime";
 import { tool as strandsTool } from "@strands-agents/sdk";
@@ -62,6 +62,25 @@ function safePath(rel: string | null | undefined): string {
     throw new Error(`path traversal not allowed; stay inside ${WORKSPACE}`);
   }
   return p;
+}
+
+// Every run_bash command starts `cd /workspace/repo`, so the natural mental model is "paths are
+// repo-relative" — but the file tools resolve against /workspace. Same string, two different files.
+// A real session lost a call to exactly this (`runtime/src/prompt.ts` → not found → retried as
+// `repo/runtime/src/prompt.ts`). Rather than restate the rule in four descriptions and hope, point at
+// the file we can see is probably the one meant.
+function notFound(path: string): { error: string; hint: string } {
+  for (const prefix of ["repo", "repo/runtime"]) {
+    const candidate = resolve(WORKSPACE, prefix, path);
+    if (candidate.startsWith(WORKSPACE + "/") && existsSync(candidate)) {
+      const suggestion = relative(WORKSPACE, candidate);
+      return {
+        error: `file not found: ${path}`,
+        hint: `did you mean \`${suggestion}\`? These tools take paths relative to the workspace (${WORKSPACE}), NOT the repo — unlike run_bash, where you cd into it first.`,
+      };
+    }
+  }
+  return { error: `file not found: ${path}`, hint: "use run_bash (ls) to explore" };
 }
 
 function fail(e: unknown, hint?: string): { error: string; hint?: string } {
@@ -196,6 +215,13 @@ function runChild(
       cwd: opts.cwd ?? WORKSPACE,
       env: { ...process.env, HOME: process.env.HOME ?? WORKSPACE },
       detached: true,
+      // stdin MUST be /dev/null, not the default pipe. There is no interactive user, so nothing will
+      // ever write to that pipe or close it — and a program that reads stdin when it isn't a TTY then
+      // blocks until the timeout kills it. `rg -l PATTERN` with no path, a bare `grep`, `cat`, `sort`,
+      // and ANY pipeline whose last stage reads stdin all hang. Measured in a real session: `ls && rg
+      // -n "…" -l` burned the full 120s default and returned exit_code -1, and the agent — reasonably —
+      // read the whole file instead. With stdin closed the same command is 136ms.
+      stdio: ["ignore", "pipe", "pipe"],
     });
     const out = new BoundedOutput();
     const err = new BoundedOutput();
@@ -276,7 +302,7 @@ For directories use run_bash (ls). For files over 5MB use run_bash (head/tail).`
   callback: ({ path, offset, limit }) => {
     try {
       const fp = safePath(path);
-      if (!existsSync(fp)) return { error: `file not found: ${path}`, hint: "use run_bash (ls) to explore" };
+      if (!existsSync(fp)) return notFound(path);
       const stat = statSync(fp);
       if (stat.isDirectory()) return { error: `path is a directory: ${path}`, hint: "use run_bash (ls)" };
       if (stat.size > MAX_FILE_SIZE) {
@@ -384,7 +410,7 @@ copy old_text verbatim from read_file output (minus the line-number prefix).`,
       if (old_text === new_text) return { error: "old_text and new_text are identical", hint: "no-op edit rejected" };
       const fp = safePath(path);
       if (!existsSync(fp) || !statSync(fp).isFile()) {
-        return { error: `file not found: ${path}`, hint: "create it with write_file or check the path" };
+        return notFound(path);
       }
       if (isBinary(fp)) return { error: "binary or non-UTF-8 file", hint: "edit_file only works on text" };
 
@@ -426,7 +452,7 @@ every edit succeeds, so a failure leaves it untouched. Read the file first.`,
   callback: ({ path, edits }) => {
     try {
       const fp = safePath(path);
-      if (!existsSync(fp) || !statSync(fp).isFile()) return { error: `file not found: ${path}`, hint: "check the path" };
+      if (!existsSync(fp) || !statSync(fp).isFile()) return notFound(path);
       if (isBinary(fp)) return { error: "binary or non-UTF-8 file", hint: "multi_edit only works on text" };
 
       let content = readFileSync(fp, "utf8");
@@ -474,7 +500,11 @@ Available in the image: git, gh, curl, jq, ripgrep, openssl, node, npm, python3.
         result.error_summary = `timed out after ${seconds}s`;
         // No "background it with nohup" advice here, however tempting: a grandchild that escapes the
         // process group is the exact case runChild's `exit`-not-`close` comment above exists for.
-        result.hint = `raise \`timeout\` (max 900) — a build or a full test suite often needs it. If it still won't fit, run the slow part alone rather than chaining commands.`;
+        // Not a constant: at the 900s cap "raise the timeout" is advice the model cannot act on.
+        result.hint =
+          seconds < 900
+            ? `raise \`timeout\` (max 900) — a build or a full test suite often needs it.`
+            : `already at the 900s maximum, so split the work: run the slow step alone rather than chaining commands, and narrow it (one package, one suite). Partial stdout above is kept.`;
       }
       else if (r.code !== 0) result.error_summary = clip(r.stderr.trim() || `exit code ${r.code}`, 500);
       return result;

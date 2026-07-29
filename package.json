@@ -25,7 +25,8 @@
     "invoke": "tsx infra/scripts/invoke.ts",
     "github-app": "tsx infra/scripts/create-github-app.ts",
     "slack-app": "tsx infra/scripts/create-slack-app.ts",
-    "docker": "bash scripts/run-local.sh"
+    "docker": "bash scripts/run-local.sh",
+    "reclaim": "bash scripts/reclaim-disk.sh"
   },
   "engines": {
     "node": ">=22"

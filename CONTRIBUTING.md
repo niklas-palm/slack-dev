@@ -27,6 +27,15 @@ Three things here will cost you real time if you don't read them first: the conc
 `runtime/src/slack-tools.ts`, the two lockfiles, and which of the build loops catches which class of bug.
 The first two encode bugs that were expensive to find.
 
+## Before changing run_bash
+
+**stdin is `/dev/null`, deliberately.** There is no interactive user, so a default stdin pipe is one
+nobody ever writes to or closes — and any program that reads stdin when it isn't a TTY then blocks until
+the timeout kills it. That is not a rare shape: `rg PATTERN` with no path argument, a bare `grep`, `cat`,
+`sort`, and **any pipeline whose last stage reads stdin**. It cost a real session 120 seconds — 23% of the
+turn — on `ls && rg -n "…" -l`, which returned `exit_code: -1` and sent the agent off to read whole files
+instead. Two tests in `tools.test.ts` pin it.
+
 ## Before changing the Slack tools
 
 The agent's tools run **concurrently** (the SDK default, and deliberately — see below), so two can touch
@@ -61,8 +70,14 @@ Four properties of the gate are load-bearing:
 again", so the model tried again — for ever, when the refusal was permanent (`message_not_found` on a
 deleted trigger message). One live turn called `set_thread_status` three times on the same dead message.
 The loop was OURS: the model was obeying our hint. So the first failure invites exactly one retry and
-every later one says *don't*, and `ask_user` never says "call ask_user again" at all — that would re-post
-the question, not just the reaction.
+every later one says *don't*. `ask_user` invites one too, but insists on the **identical** question —
+`postOnce` dedupes on kind+text, so the same wording retries only the reaction while a reworded one posts
+twice.
+
+The flag belongs to `set_thread_status` alone. `ask_user` briefly wrote it as well, which bought nothing
+(it never read it) and broke the reset: a rate-limited ❓ made the FIRST failure of a later
+`set_thread_status` look like the second, so a good answer ended with a spurious ⚠️. If you ever want
+per-tool give-up for `ask_user`, give it its own field.
 
 This is the one piece of per-turn state that is **stored rather than derived**, against the rule above,
 because "have we already asked for a retry?" isn't recoverable from anything Slack tells us. Two things
@@ -118,6 +133,18 @@ env -u AWS_PROFILE npm run image                 # register it as a microVM imag
 `npm run docker` builds exactly the image a microVM boots and probes all five lifecycle hooks. It's the
 only local loop that catches image-shaped bugs — a missing binary, the wrong Node major, dockerd failing
 to start. Three real ones were found that way, each invisible to `npm run check`.
+
+**It fills your disk, so reclaim it periodically.** Each build adds layers and build cache, and a few
+rounds — or several agents building in parallel — reach tens of GB:
+
+```bash
+npm run reclaim              # report what's reclaimable, change nothing
+npm run reclaim -- --yes     # reclaim it (Docker build cache + images, npm's package cache)
+```
+
+Do it *before* you run low, not after. At zero bytes free Docker Desktop can't start, so `docker prune`
+— the fix — can't run either; the only way out is deleting `~/Library/Containers/com.docker.docker/Data/
+vms/0/data/Docker.raw` by hand, which the script does for you when it finds the daemon down.
 
 Two things to know about the image:
 

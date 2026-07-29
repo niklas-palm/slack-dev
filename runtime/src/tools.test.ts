@@ -1,6 +1,6 @@
 // Offline unit tests for the tool contract. These assert the two invariants the whole design leans
 // on: a tool never throws, and no path escapes the workspace.
-import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -142,6 +142,25 @@ describe("read_file", () => {
   });
 });
 
+// The agent works in /workspace/repo (every run_bash starts `cd` there) but these tools resolve against
+// /workspace, so the same path means two files. A real session burned a call on exactly this. The error
+// now names the file it can see.
+describe("repo-relative path confusion", () => {
+  it("suggests the repo/ path when that's the file that exists", async () => {
+    mkdirSync(join(workspace, "repo", "runtime", "src"), { recursive: true });
+    writeFileSync(join(workspace, "repo", "runtime", "src", "prompt.ts"), "export const x = 1;\n");
+
+    const result = await call("read_file", { path: "runtime/src/prompt.ts" });
+    expect(result.error).toMatch(/not found/);
+    expect(String(result.hint)).toContain("repo/runtime/src/prompt.ts");
+  });
+
+  it("keeps the generic hint when no repo/ twin exists", async () => {
+    const result = await call("read_file", { path: "nope/nothing-here.ts" });
+    expect(String(result.hint)).toMatch(/run_bash/);
+  });
+});
+
 describe("edit_file", () => {
   it("rejects an ambiguous match instead of guessing", async () => {
     writeFileSync(join(workspace, "dup.txt"), "target\ntarget\n");
@@ -243,6 +262,35 @@ describe("run_bash", () => {
     const result = await call("run_bash", { command: "sleep 5", timeout: 1 });
     expect(result.success).toBe(false);
     expect(String(result.error_summary)).toMatch(/timed out/);
+  });
+
+  // Regression: stdin defaulted to a pipe nobody would ever write to or close, so any command that
+  // reads stdin when it isn't a TTY blocked until the timeout killed it. The real session case was
+  // `ls && rg -n "…" -l` (no path arg), which burned the full 120s default and returned exit_code -1;
+  // a bare grep/cat/sort and ANY pipeline whose last stage reads stdin hang the same way, and that last
+  // shape is a very common agent pattern.
+  //
+  // Uses `grep -r`, not `rg`: ripgrep is in the microVM image but not on a CI runner, and the point of
+  // this test is the stdin plumbing, not which search tool is installed. Same failure mode either way —
+  // a search with no file argument reads stdin. A 2s timeout is ~15x the real cost, so a regression is
+  // unambiguous rather than flaky.
+  it("does not hang on a command that reads stdin", async () => {
+    writeFileSync(join(workspace, "haystack.txt"), "needle\n");
+    const result = await call("run_bash", { command: 'grep -rl "needle" .', timeout: 2 });
+    expect(result.success, `stdin left open: ${result.error_summary ?? ""}`).toBe(true);
+    expect(String(result.stdout)).toContain("haystack.txt");
+  });
+
+  // The bare form with NO path at all — the shape that actually reads stdin and hung.
+  it("does not hang on a search with no path argument", async () => {
+    const result = await call("run_bash", { command: 'grep "needle"', timeout: 2 });
+    expect(String(result.error_summary ?? "")).not.toMatch(/timed out/);
+  });
+
+  it("does not hang on a pipeline whose last stage reads stdin", async () => {
+    const result = await call("run_bash", { command: "echo hello | cat", timeout: 2 });
+    expect(result.success).toBe(true);
+    expect(String(result.stdout)).toContain("hello");
   });
 
   // Regression: output was accumulated with `out += chunk` and only truncated after exit, so memory
