@@ -14,7 +14,7 @@ import { createServer } from "node:http";
 
 import { type Agent, ContextWindowOverflowError } from "@strands-agents/sdk";
 
-import { buildAgent, deliver, drain, runAgent } from "./agent.js";
+import { buildAgent, clearInFlight, deliver, drain, restoreInFlight, runAgent } from "./agent.js";
 import { HOOK_PORT } from "./config.js";
 import { emit } from "./emit.js";
 import { invokeGate } from "./invoke-gate.js";
@@ -60,6 +60,19 @@ async function handleInvoke(
   if (!gate.ok) {
     emit("invoke_refused", { session_id: sessionId, status: gate.status, error: gate.error });
     return { status: gate.status, body: { status: "rejected", error: gate.error } };
+  }
+
+  // A Slack payload naming a channel this agent may not post in is REFUSED here, loudly, rather than
+  // silently yielding an undefined target. Getting that wrong is worse than the bug it guards: the target
+  // would be undefined, `if (!slackTurn) return` below would skip every fallback, and a full model call
+  // would run and be billed while the person sat on a bare 👀 for ever — no message, no colour, nothing.
+  // A non-200 instead lets the INGRESS report the failure, which is the component that has the token.
+  //
+  // Note the two copies of the allowlist have different update paths (the ingress reads the CDK task env,
+  // the runtime reads the baked image), so a skew is a live possibility — see docs/iterating.md.
+  if (body.slack != null && !slackTurnFromPayload(body.slack)) {
+    emit("invoke_refused", { session_id: sessionId, status: 403, error: "channel not allowed" });
+    return { status: 403, body: { status: "rejected", error: "channel not allowed for this agent" } };
   }
 
   // The Slack ids go into per-turn STATE that the Slack tools read — never into the prompt. The model
@@ -164,6 +177,9 @@ async function runTurn(args: {
       args.sessionId,
       slackTurn,
     );
+    // The run completed, so any injected correction was actually answered — drop the recovery copy, or
+    // the drain in `finally` would requeue a message the agent has already dealt with.
+    clearInFlight(args.sessionId);
     emit("session_end", {
       session_id: args.sessionId,
       answer,
@@ -211,6 +227,11 @@ async function runTurn(args: {
     // The turn died. The agent can't apologize, so the runtime does it and marks the thread 🔴.
     reportError(err);
     agent.messages.length = historyLength; // drop the orphaned user message (see above)
+    // That truncation also removes a correction the injection hook pushed in, and the hook already
+    // emptied the inbox — so without this the only copy is gone and the finally block below drains
+    // nothing. The person would be told to mention again, and the retry would re-run the very request
+    // the correction was cancelling.
+    restoreInFlight(args.sessionId);
 
     // A context-window overflow is permanent for this session: the history is already too long, so
     // every retry hits the same wall. Drop the Agent so a follow-up mention starts clean instead of

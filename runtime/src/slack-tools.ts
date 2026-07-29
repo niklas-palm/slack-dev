@@ -516,13 +516,17 @@ the file rather than mentioning its path.`,
         filename: name,
         length: String(stat.size),
       });
-      if (!reserved.ok)
+      if (!reserved.ok) {
+        turn.failedPosts++;
         return { error: reserved.error, hint: scopeHint(reserved.error) };
+      }
 
       const uploadUrl = String(reserved.upload_url ?? "");
       const fileId = String(reserved.file_id ?? "");
-      if (!uploadUrl || !fileId)
+      if (!uploadUrl || !fileId) {
+        turn.failedPosts++;
         return { error: "Slack did not return an upload URL" };
+      }
 
       // A timeout like every Slack call has (slack.ts): this raw PUT is the one request that used to
       // have none, and set_thread_status waits on this tool — so a stalled socket parked the whole turn.
@@ -532,7 +536,10 @@ the file rather than mentioning its path.`,
         body: new Uint8Array(readFileSync(fp)),
         signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
       });
-      if (!put.ok) return { error: `upload failed with HTTP ${put.status}` };
+      if (!put.ok) {
+        turn.failedPosts++;
+        return { error: `upload failed with HTTP ${put.status}` };
+      }
 
       // The completion call and the `replied` write it justifies share the lock, like every other
       // state mutation.

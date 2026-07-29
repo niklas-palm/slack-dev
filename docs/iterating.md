@@ -13,6 +13,13 @@ neither needs a code change.
 |---|---|---|
 | Change how it behaves, what it knows about your system | `runtime/PROMPT.md` | `npm run image` |
 | Teach it a repeatable procedure | add `runtime/skills/<name>/SKILL.md` | `npm run image` |
+| Change which channels it answers in | `agent.config.json` `allowedChannels` | **`npm run deploy` AND `npm run image`** |
+
+**`allowedChannels` needs BOTH.** It is enforced twice on purpose — the ingress drops a mention before the
+👀 (from the CDK task env, so `npm run deploy`), and the runtime re-checks it because the in-VM `/invoke`
+endpoint is unauthenticated (from the baked image, so `npm run image`). Deploy without rebuilding and the
+ingress admits a mention the VM then refuses: the invocation is rejected with a 403 and the person sees
+the ingress's failure notice. Not silent, but confusing — rebuild both and it can't happen.
 
 **`npm run image`, not `npm run deploy`.** The image *is* the agent — it carries the prompt, the skills and
 the tools. The CDK stack only routes Slack mentions to it, and the ingress reads the image ARN at call
