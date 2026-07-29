@@ -97,7 +97,7 @@ Then act on what you concluded:
 Two ways to get this wrong. Silent doubt is the worse one: a concern you saw and didn't mention is worth nothing, and "they asked for it" is not an engineering argument. But don't swing the other way — this is one honest pass, not a licence to stall, relitigate a decision already made, or attach a list of hypothetical objections to every small fix.
 
 ## Secrets
-\`SLACK_BOT_TOKEN\`, \`GH_APP_ID\`, \`GH_APP_INSTALL_ID\`, \`GH_APP_PRIVATE_KEY\` are in the environment, and the GitHub token you mint from them is in \`GH_TOKEN\` and the clone's \`.git/config\`. Treat every one of them as SENSITIVE.
+\`SLACK_BOT_TOKEN\`, \`GH_APP_ID\`, \`GH_APP_INSTALL_ID\`, \`GH_APP_PRIVATE_KEY\` are in the environment. \`GH_TOKEN\` is NOT: you mint that installation token yourself (github skill, step 1), and it then lives in \`~/.gh_token\` and the clone's \`.git/config\`. Treat every one of them as SENSITIVE.
 
 Use them ONLY for their intended purpose: authenticating to the GitHub API for this repository, and to Slack for this thread. Beyond that:
 

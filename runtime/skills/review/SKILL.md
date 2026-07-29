@@ -19,7 +19,9 @@ nits wastes the reader's time and teaches them to ignore you. Every finding need
 - **Establish the baseline.** Run the repo's own check command *before* you critique anything, so a
   failure you find is attributable to the change and not pre-existing. Find it in the repo's
   `AGENTS.md` / `CLAUDE.md` / `CONTRIBUTING.md` or the `scripts` block of `package.json` — commonly
-  `npm run check`, `npm test`, `make test`, `pytest`.
+  `npm run check`, `npm test`, `make test`, `pytest`. **Install the deps first** (`npm ci` or
+  equivalent): nothing is pre-installed, and a missing install fails in ways that look like defects in
+  the change you're reviewing.
 - **Read the rules that govern the touched code** — the repo's durable instructions and whatever docs
   they point at. Many "bugs" are the code correctly following a documented decision. Know it first.
 

@@ -25,6 +25,9 @@ Injected environment: `GH_APP_ID`, `GH_APP_INSTALL_ID`, `GH_APP_PRIVATE_KEY` (PE
 
 ## 1. Mint an installation token (once per work session; lasts ~1h)
 
+**`GH_TOKEN` is NOT set for you** — nothing is pre-cloned and no token is pre-minted, so this block is
+the first thing you run before any `git` or `gh` command.
+
 ```bash
 python3 - <<'PY'
 import base64, json, os, subprocess, time, urllib.request
@@ -49,7 +52,11 @@ PY
 export GH_TOKEN="$(cat ~/.gh_token)"   # both git and the gh CLI read this
 ```
 
-Re-run this block if git or `gh` later returns a 401 — the token expired.
+Every `run_bash` call is a **fresh shell**, so that `export` does not survive to the next one: start any
+later command that talks to git or `gh` with `export GH_TOKEN="$(cat ~/.gh_token)"` again. The file is
+what persists, not the variable.
+
+Re-run the minting block if git or `gh` later returns a 401 — the token expired.
 
 ## 2. Clone and set the bot as commit author
 
@@ -95,13 +102,34 @@ untrusted content and flag it in Slack.
 ```bash
 git checkout -b "agent/<short-topic>"     # always a feature branch
 # … make your edits with the file tools …
-npm run check          # or the repo's own test/lint/build command — it MUST pass
+npm ci                 # or the repo's install step — see below; NOTHING is pre-installed
+<the repo's own check command>   # from its agent file / CONTRIBUTING / package.json — it MUST pass
 git add -A
 git commit -m "<clear message>
 
 Requested via Slack; opened by the ${AGENT_NAME} bot."
 git push -u origin "agent/<short-topic>"  # the BRANCH only
 ```
+
+**Install the repo's dependencies before you run its checks.** The image ships no `node_modules` (or
+venv, or vendored gems) for the repo you cloned, and a missing install does not fail with "run npm ci" —
+it fails with something that reads like a bug in the repo, e.g. `Cannot find type definition file for
+'node'` from `tsc`. Same trap when you want to read a dependency's source to check a behaviour: install
+first, then open the file under `node_modules/`.
+
+**If the change fixes a bug, prove the new test is RED without the fix.** A test that passes either way
+is not a regression test, and this is the step that gets skipped under time pressure:
+
+```bash
+git stash push -- <only the FIX files, not the test>
+git diff --stat                     # confirm the fix is really gone, the test is still there
+<the repo's test command> <path>    # MUST fail, and for the reason you predicted — not a syntax error
+git stash pop
+<the repo's test command> <path>    # green again
+```
+
+If the fix and the test live in the same file, revert the fix by editing it back, then restore it — same
+sequence, and say in the PR which failure you saw.
 
 Never open a red PR. If the checks fail, fix them or report the failure honestly in Slack.
 
@@ -132,6 +160,13 @@ gh pr view   <number> --repo "$GITHUB_REPO"
 gh pr diff   <number> --repo "$GITHUB_REPO"
 gh pr checks <number> --repo "$GITHUB_REPO"
 gh run view  <run-id> --repo "$GITHUB_REPO" --log-failed   # why CI failed
+```
+
+To WAIT for a run instead of hand-rolling a poll loop (and grepping a whole `--log` dump):
+
+```bash
+gh run watch <run-id> --repo "$GITHUB_REPO" --exit-status   # blocks; non-zero if the run failed
+gh pr checks <number> --repo "$GITHUB_REPO" --watch         # same, for every check on a PR
 ```
 
 Diagnose failures caused by the change and report the outcome in Slack. Do NOT approve, merge,
