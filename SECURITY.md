@@ -38,8 +38,21 @@ you extend this — and if you widen either, say so loudly in your fork.
 
 ## Known limits, accepted deliberately
 
+- **Secrets are redacted from logs at one chokepoint, and the redaction is not total.** `emit()`
+  (`runtime/src/emit.ts`) scrubs known token shapes (`ghs_`, `xox…`, PEM blocks, `x-access-token:`) plus
+  the literal values of the secrets we put in the environment, because `tool_result` lines log whatever a
+  command printed — and the GitHub token lives in the clone's remote URL, so a plain `git remote -v` used
+  to persist a live credential to CloudWatch. Two limits worth knowing: a token **split across a line
+  break** still gets through (the patterns are per-line), and `emit()` is the ONLY redacted path — a bare
+  `console.log` added later is not covered.
 - **`curl` inside `run_bash` is unguarded** — no SSRF protection, size cap, or content-type check. Fine
   for a trusted workspace fetching a doc page; port a real fetcher if you need research.
+- **Isolation is per-THREAD, not per-message.** A thread's microVM is created on the first mention and
+  REUSED for every later one until it expires (8h ceiling, suspended while idle) — that reuse is what
+  gives a follow-up its conversation and its cloned repo. The consequence: if a thread is compromised by
+  prompt injection, the same VM — and everything written to `/workspace` — is still there for the next
+  mention in that thread. Firecracker isolates one thread from another, not a thread from its own past.
+  **If you suspect a thread, start a new one** rather than correcting in place.
 - **Never push to the default branch / never merge is enforced by the prompt, not by IAM.** The App's
   `contents: write` technically allows both. Add a branch-protection rule if that matters to you.
 - **Secrets live in SSM SecureStrings** and reach the runtime as parameter *paths*; no value enters a

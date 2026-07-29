@@ -167,8 +167,9 @@ stall.
   otherwise) but cannot merge.
 - **Read-only in AWS, plus Bedrock.** It cannot create, modify, or delete a resource, or read another
   agent's secrets. An infra fix is therefore a PR, not an apply, and no prompt injection can mutate the
-  account. Bedrock is unrestricted because the agent is often asked about the account's own Bedrock
-  setup, and Bedrock holds no data of its own.
+  account. Bedrock is invoke + read (`InvokeModel*`, `Converse*`, `Get*`/`List*`) so the agent can also
+  answer questions about the account's own Bedrock setup — but **not `bedrock:*`**, which would grant
+  `DeleteKnowledgeBase` and `Retrieve` on a role documented as read-only.
 - **Answers only in approved channels** (`allowedChannels`), checked in the ingress before any reaction
   or model call — so a mention from elsewhere is inert, not merely refused.
 - **Secrets reach the runtime as SSM parameter *paths***; values never enter the template, and the prompt
@@ -214,7 +215,7 @@ Harden command execution before pointing this at untrusted users.
 │   │   ├── slack-tools.ts the agent's Slack surface (thread-bound)
 │   │   ├── slack.ts      the runtime's own Slack calls: status + fallback
 │   │   ├── secrets.ts    SSM SecureString → process.env
-│   │   ├── emit.ts       one structured JSON log line per event
+│   │   ├── emit.ts       one structured JSON log line per event — and the redaction chokepoint
 │   │   ├── local.ts      run one turn locally, no Slack and no deploy
 │   │   └── config.ts     invariants (region, model) + deploy values
 │   └── Dockerfile        AL2023: docker, node, python, git, gh, aws, jq, ripgrep

@@ -54,7 +54,7 @@ point the user there.
 | Symptom | Cause and fix |
 |---|---|
 | `message_not_found` on every `reactions.add` | The thread's VM is serving a session id whose Slack message doesn't exist — almost always because someone tested the webhook with a hand-crafted payload, whose fake `ts` claimed a session row that a later real mention then reused. Terminate that VM, delete its row from the session table, and start a NEW thread. **Never hand-craft a `ts` against a live agent** — test with a real Slack message. |
-| A reply lands but the follow-up shows only 👀 | A mention arriving mid-turn is INJECTED into the running turn rather than starting a new one (`grep message_injected`), so there's no second reply — that part is correct. But it SHOULD still get the turn's terminal 🟢/🔴. If it's stuck on a bare 👀, check `grep also_react_capped`: only the few most recent injected messages get a reaction (the sweep costs Slack calls on every status change), so the 5th+ interruption in one turn keeps its 👀 by design. |
+| A reply lands but the follow-up shows only 👀 | A mention arriving mid-turn is INJECTED into the running turn rather than starting a new one (`grep message_injected`), so there's no second reply — that part is correct. But it SHOULD still get the turn's terminal 🟢/🔴. If it's stuck on a bare 👀, check `grep also_react_capped`: only the few most recent injected messages get a reaction (the sweep costs Slack calls on every status change), so the 5th+ interruption in one turn keeps its 👀 by design. Also dropped deliberately when the VM is reclaimed mid-turn (`grep terminated_mid_turn`): that path has a hard 60s budget and spends it on posting the message rather than on reactions. |
 | The first VM of a fresh deploy can't reach Slack | It booted before the bot token was stored. Secrets load per-VM in the `/run` hook, so any VM started earlier has none. Terminate it; the next mention starts a VM that reads the token. |
 
 ## When you're unsure
@@ -71,4 +71,5 @@ env -u AWS_PROFILE aws logs tail /aws/lambda/<function> --region eu-west-1 --sin
 ```
 
 Every log line is structured JSON, so `grep` on an event name works: `session_start`, `tool_input`,
-`tool_result`, `incomplete_turn`, `slack_status_warning`, `channel not allowed`, `ALERT`, `[route]`.
+`tool_result`, `incomplete_turn`, `slack_status_warning`, `slack_rate_limited`, `terminated_mid_turn`,
+`channel not allowed`, `ALERT`, `[route]`.
