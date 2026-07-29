@@ -14,7 +14,7 @@ import { createServer } from "node:http";
 
 import { type Agent, ContextWindowOverflowError } from "@strands-agents/sdk";
 
-import { buildAgent, clearInFlight, deliver, drain, restoreInFlight, runAgent } from "./agent.js";
+import { buildAgent, deliver, drain, restoreInFlight, runAgent } from "./agent.js";
 import { HOOK_PORT } from "./config.js";
 import { emit } from "./emit.js";
 import { invokeGate } from "./invoke-gate.js";
@@ -164,9 +164,6 @@ async function runTurn(args: {
       args.sessionId,
       slackTurn,
     );
-    // The run completed, so any injected correction was actually answered — drop the recovery copy, or
-    // the drain in `finally` would requeue a message the agent has already dealt with.
-    clearInFlight(args.sessionId);
     emit("session_end", {
       session_id: args.sessionId,
       answer,

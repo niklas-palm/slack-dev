@@ -47,6 +47,19 @@ describe("emit", () => {
     expect(lines[0]).not.toContain("ghp_ZzZzZzZzZzZzZzZzZzZzZz");
   });
 
+  // agent.ts slices tool_result at 4000 chars, so a PEM whose END marker falls past the cut used to be
+  // emitted in the clear — reachable from a plain `env` or `head -5 key.pem`, no attack needed. The private
+  // key is the ROOT credential (it mints the ghs_ tokens the other patterns catch), so this leaked more
+  // than the bug redaction was added to fix.
+  it("redacts a private key whose END marker was truncated away", () => {
+    emit("tool_result", {
+      result: "-----BEGIN PRIVATE KEY-----\nMIIEvAIBADANBgkqSECRETMATERIAL",
+    });
+
+    expect(lines[0]).not.toContain("SECRETMATERIAL");
+    expect(lines[0]).toContain("[redacted]");
+  });
+
   it("leaves ordinary output alone", () => {
     emit("tool_result", { result: "3 files changed, 12 insertions(+)" });
 

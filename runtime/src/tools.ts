@@ -16,6 +16,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  lstatSync,
   readSync,
   realpathSync,
   statSync,
@@ -86,6 +87,22 @@ export function safePath(rel: string | null | undefined): string {
   try {
     real = realpathSync.native(p);
   } catch {
+    // realpath threw. That means SOME component doesn't exist — but if the leaf itself is a symlink, it's
+    // a DANGLING one, and the create branch below would resolve only its parent and re-attach the link's
+    // own name, so the write would follow it straight out of the workspace. `lstat` sees the link without
+    // following it. Reproduced before this guard: a committed `ci.yml -> /outside/authorized_keys` whose
+    // target didn't exist yet returned {"success":true} and wrote outside. The live-target case was
+    // already refused, so the original fix was only half closed — and dangling is the MORE likely shape
+    // in a cloned repo, since the target usually exists only on the author's machine.
+    try {
+      if (lstatSync(p).isSymbolicLink()) {
+        throw new Error(`path traversal not allowed; stay inside ${WORKSPACE}`);
+      }
+    } catch (e) {
+      if (e instanceof Error && e.message.includes("path traversal")) throw e;
+      // lstat threw for its own reasons (the leaf really is absent) — that's the normal create case.
+    }
+
     let existing = dirname(p);
     const tail: string[] = [basename(p)];
     while (!existsSync(existing) && dirname(existing) !== existing) {
