@@ -190,6 +190,19 @@ describe("the stack", () => {
     expect(build).toContain("--additional-os-capabilities ALL");
   });
 
+  it("gives the microVM log group a retention, and CI the permission to set it", () => {
+    // The group is created implicitly on first write, and an implicit group keeps its streams FOR EVER —
+    // including `tool_result` lines, i.e. file contents and command output. Verified in the live account
+    // before this: /aws/lambda-microvms/slack-dev-* had no retention while the CDK-owned ingress group
+    // had 30 days. CDK can't own it (declaring an existing group fails the deploy), so build.sh
+    // reconciles it, and the OIDC deploy role must be able to — otherwise CI's image step 403s.
+    const build = readFileSync(join(REPO_ROOT, "infra", "microvm", "build.sh"), "utf8");
+    expect(build).toContain("/aws/lambda-microvms/${IMAGE_NAME}");
+    expect(build).toMatch(/put-retention-policy .*--retention-in-days 14/);
+    const oidc = readFileSync(join(REPO_ROOT, "scripts", "setup-github-oidc.sh"), "utf8");
+    expect(oidc).toContain("logs:PutRetentionPolicy");
+  });
+
   it("passes the channel allowlist to the ingress Lambda", () => {
     // A config value that never reaches the template is a silent security hole: the deploy succeeds,
     // the docs claim the agent is restricted, and every channel still works.
