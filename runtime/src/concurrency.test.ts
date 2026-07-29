@@ -20,7 +20,7 @@ process.env.WORKSPACE_DIR = realpathSync(
 );
 process.env.SLACK_BOT_TOKEN = "not-a-real-token";
 
-const { buildAgent, restoreInFlight, runAgent } = await import("./agent.js");
+const { buildAgent, clearInFlight, restoreInFlight, runAgent } = await import("./agent.js");
 const { newSlackTurn, isWaiting } = await import("./slack-tools.js");
 const { deliver, drain } = await import("./agent.js");
 const { SLACK_TOOLS } = await import("./slack-tools.js");
@@ -466,6 +466,21 @@ describe("an upload that fails before the final step", () => {
     expect(turn.failedPosts, "an upload that never reached Slack is a failed post").toBeGreaterThan(0);
     expect(rounds, "the model needs a round to retry the lost file").toBeGreaterThan(1);
   });
+
+  it("counts a failure at the completion step too", async () => {
+    writeFileSync(join(process.env.WORKSPACE_DIR!, "report2.txt"), "the report\n");
+    const { turn, rounds } = await runBatch(
+      [
+        { name: "reply_to_thread", input: { text: "Report attached." } },
+        { name: "upload_file", input: { path: "report2.txt" } },
+        { name: "set_thread_status", input: { status: "done" } },
+      ],
+      () => failing.add("files.completeUploadExternal"),
+    );
+
+    expect(turn.failedPosts).toBeGreaterThan(0);
+    expect(rounds, "a file that never completed is still a lost file").toBeGreaterThan(1);
+  });
 });
 
 describe("turn state versus what Slack shows", () => {
@@ -509,6 +524,23 @@ describe("a correction delivered to a model call that then throws", () => {
     // agent.messages (truncated), so the drain in runTurn's `finally` requeues nothing.
     restoreInFlight("crash-recovery");
     expect(drain("crash-recovery"), "the correction must be recoverable").toEqual(["stop, wrong repo"]);
+  });
+
+
+  it("does not resurrect a correction a completed run already answered", async () => {
+    const agent = buildAgent("answered");
+    deliver("answered", "use the other branch");
+    (agent.model as unknown as { stream: unknown }).stream =
+      async function* (): AsyncGenerator<unknown> {
+        yield new ModelMessageStartEvent({ type: "modelMessageStartEvent", role: "assistant" });
+        yield new ModelMessageStopEvent({ type: "modelMessageStopEvent", stopReason: "endTurn" });
+      };
+    await runAgent(agent, "do the thing", "answered");
+
+    clearInFlight("answered"); // what runTurn does on the success path
+    restoreInFlight("answered"); // a LATER turn crashing must not bring it back
+
+    expect(drain("answered"), "an answered correction must not be requeued").toEqual([]);
   });
 });
 

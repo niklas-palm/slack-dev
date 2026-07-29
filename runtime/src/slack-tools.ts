@@ -17,7 +17,6 @@ import { basename } from "node:path";
 import { tool as strandsTool } from "@strands-agents/sdk";
 import { z } from "zod";
 
-import { WORKSPACE_DIR as WORKSPACE } from "./config.js";
 import { emit } from "./emit.js";
 import { safePath } from "./tools.js";
 import {
@@ -497,8 +496,10 @@ the file rather than mentioning its path.`,
       let fp: string;
       try {
         fp = safePath(path);
-      } catch {
-        return { error: `path traversal not allowed; stay inside ${WORKSPACE}` };
+      } catch (e) {
+        // Forward safePath's own message rather than rebuilding it: two copies of the same string in two
+        // files is exactly the drift this change was meant to remove.
+        return { error: e instanceof Error ? e.message : String(e) };
       }
       const stat = statSync(fp);
       if (!stat.isFile()) return { error: `not a regular file: ${path}` };

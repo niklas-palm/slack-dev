@@ -16,6 +16,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   delete process.env.SLACK_BOT_TOKEN;
+  delete process.env.SLACK_SIGNING_SECRET;
 });
 
 describe("emit", () => {
@@ -29,14 +30,15 @@ describe("emit", () => {
   });
 
   it("redacts a secret it only knows from the environment", () => {
-    // A signing secret is just hex — no pattern can catch it, so the literal value must be scrubbed.
-    // Assembled, not literal: a scanner flags the whole-token shape even on an obvious fake.
-    const fake = ["xoxb", "0000", "not-a-real-token-value"].join("-");
-    process.env.SLACK_BOT_TOKEN = fake;
+    // Hex, deliberately: a signing secret matches no pattern, so only the literal-value scrub can catch
+    // it. An earlier version of this test used an `xoxb-…` shape, which the pattern loop redacted — so
+    // the env-var scrub was never exercised and deleting it kept every test green.
+    process.env.SLACK_SIGNING_SECRET = "8f3a1c9e2b7d4056a1f8e3c7b2d9046f";
 
-    emit("tool_result", { result: `token is ${fake} ok` });
+    emit("tool_result", { result: `signed with ${process.env.SLACK_SIGNING_SECRET} ok` });
 
-    expect(lines[0]).not.toContain("not-a-real-token");
+    expect(lines[0]).not.toContain("8f3a1c9e");
+    expect(lines[0]).toContain("[redacted]");
   });
 
   it("redacts a secret nested anywhere in the payload", () => {

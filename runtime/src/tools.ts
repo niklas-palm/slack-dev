@@ -110,19 +110,18 @@ export function safePath(rel: string | null | undefined): string {
  *
  * Matters because the workspace root itself is often behind a link — macOS `/tmp` is `/private/tmp`, and
  * a bind-mounted workspace can be too. Comparing a resolved child against an UNresolved root refuses
- * every legitimate read, which is a worse bug than the escape it was meant to close. Memoized, and
- * tolerant of the root not existing yet (tests point WORKSPACE_DIR at a temp dir before creating it).
+ * every legitimate read, which is a worse bug than the escape it was meant to close.
+ *
+ * Deliberately NOT memoized: a cache latched the unresolved path for ever when the root didn't exist at
+ * the first call, which re-introduced exactly that regression. One realpath per file op is noise next to
+ * the statSync/readFileSync already on every path.
  */
-let cachedRoot: string | undefined;
 function workspaceRoot(): string {
-  if (cachedRoot === undefined) {
-    try {
-      cachedRoot = realpathSync.native(WORKSPACE);
-    } catch {
-      cachedRoot = WORKSPACE;
-    }
+  try {
+    return realpathSync.native(WORKSPACE);
+  } catch {
+    return WORKSPACE;
   }
-  return cachedRoot;
 }
 
 /**

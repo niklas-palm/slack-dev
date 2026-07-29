@@ -294,6 +294,37 @@ describe("the stack", () => {
     expect(JSON.stringify(deny?.NotResource)).toContain("/slack-dev/alpha/");
   });
 
+  // Same class of gap as the SSM Deny this file already pins: microVM log streams carry whatever a tool
+  // printed, and until recently that included a live `ghs_…` GitHub token. Several agents share one
+  // account by design, so an unscoped grant lets one agent read (or forge) another's audit trail.
+  it("scopes microVM log access to this agent's own group", () => {
+    const { template } = synth({ name: "alpha" });
+    const statements = Object.values(template.findResources("AWS::IAM::Policy")).flatMap(
+      (p) =>
+        p.Properties?.PolicyDocument?.Statement as Array<{
+          Effect?: string;
+          Action?: unknown;
+          Resource?: unknown;
+          NotResource?: unknown;
+        }>,
+    );
+
+    const write = statements.find(
+      (st) => st.Effect !== "Deny" && JSON.stringify(st.Action ?? "").includes("logs:PutLogEvents"),
+    );
+    expect(write, "the agent must be able to write its own logs").toBeDefined();
+    expect(
+      JSON.stringify(write?.Resource),
+      "a write grant on /aws/lambda-microvms/* covers EVERY agent's group",
+    ).toContain("slack-dev-alpha");
+
+    const readDeny = statements.find(
+      (st) => st.Effect === "Deny" && JSON.stringify(st.Action ?? "").includes("logs:FilterLogEvents"),
+    );
+    expect(readDeny, "ReadOnlyAccess grants logs:Get*/FilterLogEvents on *, so only a Deny narrows it").toBeDefined();
+    expect(JSON.stringify(readDeny?.NotResource)).toContain("slack-dev-alpha");
+  });
+
   it("grants kms:Decrypt only via SSM, since SecureString reads need it", () => {
     const { template } = synth();
     const statements = Object.values(
