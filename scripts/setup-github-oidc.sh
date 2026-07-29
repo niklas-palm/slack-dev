@@ -116,11 +116,6 @@ fi
 # lambda:PassNetworkConnector is needed at IMAGE-BUILD time, not just at run-microvm time:
 # CreateMicrovmImage validates the connectors the image will run with. It's a permission distinct from
 # CreateMicrovmImage, and it only ever fails on a real call — never at synth or in a dry run.
-#
-# The logs grant is what lets `npm run image` put a 14-day retention on the agent's log group (see
-# infra/microvm/build.sh — an implicitly created group keeps its data for ever). Create + set retention
-# only: no read verb, so CI still cannot see what an agent logged. NOTE for an existing pipeline: re-run
-# `npm run setup:oidc` after pulling this, or the image step fails with AccessDenied.
 POLICY=$(cat <<JSON
 {
   "Version": "2012-10-17",
@@ -145,11 +140,7 @@ POLICY=$(cat <<JSON
       "Resource": "arn:aws:iam::${ACCT}:role/SlackDevMicrovmBuildRole" },
     { "Sid": "PublishImageArnOnly", "Effect": "Allow",
       "Action": ["ssm:PutParameter", "ssm:AddTagsToResource"],
-      "Resource": "arn:aws:ssm:${REGION}:${ACCT}:parameter/slack-dev/*/microvm-image-arn" },
-    { "Sid": "AgentLogRetention", "Effect": "Allow",
-      "Action": ["logs:CreateLogGroup", "logs:PutRetentionPolicy"],
-      "Resource": ["arn:aws:logs:${REGION}:${ACCT}:log-group:/aws/lambda-microvms/slack-dev-*",
-                   "arn:aws:logs:${REGION}:${ACCT}:log-group:/aws/lambda-microvms/slack-dev-*:*"] }
+      "Resource": "arn:aws:ssm:${REGION}:${ACCT}:parameter/slack-dev/*/microvm-image-arn" }
   ]
 }
 JSON

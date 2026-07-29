@@ -190,17 +190,16 @@ describe("the stack", () => {
     expect(build).toContain("--additional-os-capabilities ALL");
   });
 
-  it("gives the microVM log group a retention, and CI the permission to set it", () => {
-    // The group is created implicitly on first write, and an implicit group keeps its streams FOR EVER —
-    // including `tool_result` lines, i.e. file contents and command output. Verified in the live account
-    // before this: /aws/lambda-microvms/slack-dev-* had no retention while the CDK-owned ingress group
-    // had 30 days. CDK can't own it (declaring an existing group fails the deploy), so build.sh
-    // reconciles it, and the OIDC deploy role must be able to — otherwise CI's image step 403s.
-    const build = readFileSync(join(REPO_ROOT, "infra", "microvm", "build.sh"), "utf8");
-    expect(build).toContain("/aws/lambda-microvms/${IMAGE_NAME}");
-    expect(build).toMatch(/put-retention-policy .*--retention-in-days 14/);
-    const oidc = readFileSync(join(REPO_ROOT, "scripts", "setup-github-oidc.sh"), "utf8");
-    expect(oidc).toContain("logs:PutRetentionPolicy");
+  it("expires the agent's own microVM logs", () => {
+    // That group holds every tool_result — file contents, command output — and an implicitly created
+    // group keeps them FOR EVER. Verified in the live account before this fix:
+    // /aws/lambda-microvms/slack-dev-* had no retention while this stack's ingress group had 30 days.
+    // The service owns the group's name, so this is a retention policy on a group CDK didn't create.
+    const { template } = synth({ name: "retentiontest" });
+    template.hasResourceProperties("Custom::LogRetention", {
+      LogGroupName: "/aws/lambda-microvms/slack-dev-retentiontest",
+      RetentionInDays: 14,
+    });
   });
 
   it("passes the channel allowlist to the ingress Lambda", () => {

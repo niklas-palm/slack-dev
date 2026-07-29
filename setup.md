@@ -336,9 +336,10 @@ That hits the real deployed runtime and model; the answer lands in the logs (the
 
 ## 8. Where to look when something's wrong
 
-Both log groups expire: the ingress after 30 days, the agent's own after **14** (`npm run image` sets it
-— an implicitly created group would otherwise keep every `tool_result`, file contents included, for ever).
-So debug from the recent past, and copy out anything you want to keep.
+Both log groups expire: the ingress after 30 days, the agent's own after **14** (the stack sets it — the
+microVM service creates that group implicitly, and an implicitly created group would otherwise keep every
+`tool_result`, file contents included, for ever). So debug from the recent past, and copy out anything you
+want to keep.
 
 ```bash
 # The agent's own logs — every tool call and its result
@@ -414,11 +415,6 @@ own** agent — its repo, its Slack channel — so nothing about it looks wrong 
 fires. Left as-is, your pipeline deploys an agent pointed at someone else's channel. Overwrite all four
 fields with yours, commit it, and keep in mind it's public: a channel id isn't a credential, but it is a
 real identifier anyone reading your repo can see.
-
-**Already had this set up?** Re-run `npm run setup:oidc` after pulling — the deploy role now also needs
-`logs:CreateLogGroup` + `logs:PutRetentionPolicy` on `/aws/lambda-microvms/slack-dev-*` (that's how
-`npm run image` gives the agent's log group its 14-day retention). The script is idempotent, and without
-it the image step fails with AccessDenied.
 
 After that, a push to `main` runs `npm run check`, then `npm run image`, then `npm run deploy` — in that
 order, because the image is the agent and the stack only routes to it. Pull requests run the checks

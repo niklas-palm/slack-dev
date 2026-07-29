@@ -61,24 +61,6 @@ aws iam put-role-policy --role-name SlackDevMicrovmBuildRole --policy-name read-
 # The logs grant is not optional: without it Lambda cannot write the build log, and the failure message
 # above tells the operator to go read a log that was never created.
 
-# The agent's log group, with a RETENTION. Reconciled here because nothing else can own it: the group is
-# created implicitly on first write, by whoever gets there first (the service, or the VM's own role — see
-# the logs grant in infra/lib/stack.ts), and an implicitly created group keeps its data FOR EVER. CDK
-# can't take it over either: declaring it there would fail with "already exists" on every deployment that
-# has run once. So create it before the first VM does, and set the retention every run.
-#
-# It matters more than a cost line: these streams carry `tool_result` — file contents, command output —
-# so anything a redaction ever misses would sit in CloudWatch indefinitely. 14 days is comfortably longer
-# than any debugging window (a thread's VM lives at most 8h) and bounds both.
-#
-# Idempotent: create-log-group fails harmlessly when the group exists, put-retention-policy is a plain
-# overwrite. `|| true` covers only the create — a retention that can't be set must still be loud, or the
-# guarantee silently stops holding.
-LOG_GROUP="/aws/lambda-microvms/${IMAGE_NAME}"
-echo "▸ log group $LOG_GROUP → 14-day retention"
-aws logs create-log-group --log-group-name "$LOG_GROUP" --region "$REGION" 2>/dev/null || true
-aws logs put-retention-policy --log-group-name "$LOG_GROUP" --retention-in-days 14 --region "$REGION"
-
 # The build context is runtime/ — the Dockerfile plus everything it COPYs. .dockerignore keeps tests and
 # scratch files out, so an unrelated edit doesn't produce a new image.
 echo "▸ packaging runtime/"
