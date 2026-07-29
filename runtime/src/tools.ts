@@ -572,7 +572,7 @@ const viewImage = tool({
   callback: async ({ path, question }) => {
     try {
       const fp = safePath(path);
-      if (!existsSync(fp) || !statSync(fp).isFile()) return { error: `file not found: ${path}` };
+      if (!existsSync(fp) || !statSync(fp).isFile()) return notFound(path);
       const format = IMAGE_FORMATS[extname(fp).toLowerCase()];
       if (!format) {
         return { error: `unsupported image type: ${extname(fp)}`, hint: `supported: ${Object.keys(IMAGE_FORMATS).join(", ")}` };

@@ -78,7 +78,7 @@ export interface SlackTurn {
     {
       name: string;
       done: Promise<void>;
-      settle: (ok: boolean) => void;
+      settle: () => void;
       /** Whether the call succeeded. Undefined until it settles. */
       ok?: boolean;
     }
@@ -151,7 +151,7 @@ export function declarePending(
   toolUseId: string,
   name: string,
 ): void {
-  let settle = (_ok: boolean): void => {};
+  let settle = (): void => {};
   const done = new Promise<void>((resolve) => {
     settle = () => resolve();
   });
@@ -170,7 +170,7 @@ export function finishPending(
   const entry = turn.pending.get(toolUseId);
   if (entry) {
     entry.ok = ok;
-    entry.settle(ok);
+    entry.settle();
   }
 }
 

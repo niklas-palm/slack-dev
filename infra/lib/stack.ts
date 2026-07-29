@@ -47,7 +47,7 @@ import { StringParameter } from "aws-cdk-lib/aws-ssm";
 import type { Construct } from "constructs";
 
 import type { AgentConfig } from "./config.js";
-import { REGION, REPO_ROOT } from "./config.js";
+import { IDLE_SESSION_SECONDS, REGION, REPO_ROOT } from "./config.js";
 
 export interface SlackDevStackProps extends StackProps {
   agent: AgentConfig;
@@ -226,7 +226,7 @@ export class SlackDevStack extends Stack {
         SESSION_TABLE: sessions.tableName,
         MICROVM_IMAGE_ARN_PARAM: params.imageArn,
         MICROVM_ROLE_ARN: vmRole.roleArn,
-        MICROVM_IDLE_SECONDS: String(agent.idleSessionTimeout),
+        MICROVM_IDLE_SECONDS: String(IDLE_SESSION_SECONDS),
         SIGNING_SECRET_PARAM: params.slackSigningSecret,
         BOT_TOKEN_PARAM: params.slackBotToken,
       },

@@ -23,6 +23,7 @@ import { GetParameterCommand, PutParameterCommand, SSMClient } from "@aws-sdk/cl
 
 import { REGION } from "../lib/config.js";
 import { arg, openBrowser, requireConfig, rejectUnknownFlags } from "./cli.js";
+import { manifestFormHtml } from "./manifest-form.js";
 
 const PORT = 8724; // arbitrary, only needs to be free for a minute
 const REDIRECT = `http://localhost:${PORT}/callback`;
@@ -129,15 +130,7 @@ function awaitManifestCode(manifest: Record<string, unknown>): Promise<string> {
       }
 
       res.writeHead(200, { "Content-Type": "text/html" });
-      res.end(`<!doctype html><meta charset="utf-8"><title>Create GitHub App</title>
-<body style="font:16px system-ui;margin:3rem auto;max-width:34rem">
-<h2>Creating the GitHub App “${manifest.name}”…</h2>
-<p>Sending you to GitHub. The name is prefilled — just click <b>Create GitHub App</b>.</p>
-<form id="f" action="${target}" method="post">
-  <input type="hidden" name="manifest" value='${JSON.stringify(manifest).replace(/'/g, "&apos;")}'>
-  <noscript><button type="submit">Continue to GitHub</button></noscript>
-</form>
-<script>document.getElementById("f").submit()</script>`);
+      res.end(manifestFormHtml(manifest, target));
     });
 
     server.on("error", reject);

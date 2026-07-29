@@ -9,6 +9,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { parse } from "yaml";
+
+import { manifestFormHtml } from "../scripts/manifest-form.js";
 import { describe, expect, it } from "vitest";
 
 import { REPO_ROOT } from "../lib/config.js";
@@ -35,10 +37,13 @@ describe("the GitHub App manifest", () => {
       description: "It's the team's agent.",
       url: "https://x",
     };
-    const embedded = JSON.stringify(manifest).replace(/'/g, "&apos;");
 
-    expect(embedded).not.toMatch(/'/);
-    expect(JSON.parse(embedded.replace(/&apos;/g, "'"))).toEqual(manifest);
+    const html = manifestFormHtml(manifest, "https://github.com/settings/apps/new");
+
+    // The value sits in a single-quoted attribute, so no bare apostrophe may survive inside it.
+    const value = /name="manifest" value='([^']*)'/.exec(html);
+    expect(value, "the manifest input must still be single-quoted").not.toBeNull();
+    expect(JSON.parse(value![1]!.replace(/&apos;/g, "'"))).toEqual(manifest);
   });
 
   // GitHub treats `hook_attributes` as a webhook declaration whose `url` is REQUIRED, so passing it

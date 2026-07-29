@@ -184,7 +184,7 @@ process. So a VM working hard on a single request looks completely idle:
 There is no keep-alive from inside — the VM cannot generate inbound traffic to itself through the proxy.
 The mitigations are (a) set the idle window comfortably above your longest plausible request, and (b) log
 at the `suspend` hook when work is in flight, so the symptom is diagnosable. This project does both
-(`idleSessionTimeout` in `infra/lib/config.ts`; `suspended_mid_turn` in `runtime/src/server.ts`).
+(`IDLE_SESSION_SECONDS` in `infra/lib/config.ts`; `suspended_mid_turn` in `runtime/src/server.ts`).
 
 Resources default to 2 GB / 1 vCPU; `--resources minimumMemoryInMiB=8192` gives 8 GB / 4 vCPU.
 

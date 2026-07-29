@@ -428,6 +428,25 @@ describe("a declared reply the executor rejects before its body runs", () => {
   });
 });
 
+describe("a declared reply the executor rejects, alongside one that posted", () => {
+  // The OTHER half of postFailedThisBatch. The test above covers a schema-rejected reply on its own, so
+  // nothing posted and `replied` stayed false — the runtime's fallback catches that. This is the case
+  // that hides: a sibling reply DID post, so `replied` is true and the status went terminal, and the
+  // rejected one is silently dropped. `failedPosts` can't see it (the body never ran, so nothing counted
+  // it), which is exactly why postFailedThisBatch also reads `p.ok === false` from the hook. Verified
+  // red: reducing that function to `return turn.failedPosts > 0` ends this turn at one round.
+  it("still gets another round, so the lost message can be retried", async () => {
+    const { turn, rounds } = await runBatch([
+      { name: "reply_to_thread", input: { text: "PART 1" } },
+      { name: "reply_to_thread", input: { text: "" } },
+      { name: "set_thread_status", input: { status: "done" } },
+    ]);
+
+    expect(turn.replied, "the surviving reply posted").toBe(true);
+    expect(rounds, "a reply that never ran must not end the turn").toBeGreaterThan(1);
+  });
+});
+
 describe("turn state versus what Slack shows", () => {
   it("never records a status whose reaction Slack rejected", async () => {
     const { turn, reactions } = await runBatch(
