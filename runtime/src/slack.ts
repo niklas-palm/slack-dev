@@ -67,10 +67,36 @@ export function alsoReactTo(target: SlackTarget, ts: string): void {
  * Narrow an unknown payload field to a usable target — a malformed one must not break the turn.
  * `alsoReactTo` is deliberately NOT read from the payload: it's runtime-internal state, never wire input.
  */
+/**
+ * Channels this agent may post in, as the CDK baked them into the task.
+ *
+ * The ingress checks this too, and that check is the primary one. This is defence in depth because the
+ * in-VM `/invoke` endpoint is UNAUTHENTICATED (see server.ts) and takes `channel_id` from its request
+ * body — so `run_bash` doing `curl localhost:9000/invoke -d '{"slack":{"channel_id":"C_ELSEWHERE",…}}'`
+ * bypassed the ingress allowlist entirely and could post anywhere the bot is a member. A prompt-injected
+ * agent is exactly the scenario the allowlist exists for, so the runtime must not trust the invocation.
+ *
+ * Empty means unrestricted, matching the ingress's documented default for a small workspace.
+ */
+// Split on space OR comma: the image bakes it space-separated (the microVM CLI's
+// --environment-variables is itself comma-delimited), while the ingress uses commas.
+const ALLOWED_CHANNELS = (process.env.ALLOWED_CHANNELS ?? "")
+  .split(/[\s,]+/)
+  .map((c) => c.trim())
+  .filter(Boolean);
+
+export function channelAllowedHere(channelId: string): boolean {
+  return ALLOWED_CHANNELS.length === 0 || ALLOWED_CHANNELS.includes(channelId);
+}
+
 export function asSlackTarget(value: unknown): SlackTarget | undefined {
   if (typeof value !== "object" || value === null) return undefined;
   const v = value as Record<string, unknown>;
   if (typeof v.channel_id !== "string" || typeof v.thread_ts !== "string") return undefined;
+  if (!channelAllowedHere(v.channel_id)) {
+    emit("channel_not_allowed", { channel_id: v.channel_id });
+    return undefined;
+  }
   return {
     channel_id: v.channel_id,
     thread_ts: v.thread_ts,

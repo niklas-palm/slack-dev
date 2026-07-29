@@ -1,6 +1,6 @@
 // Offline unit tests for the tool contract. These assert the two invariants the whole design leans
 // on: a tool never throws, and no path escapes the workspace.
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -10,6 +10,8 @@ import { beforeAll, describe, expect, it } from "vitest";
 // realpath because macOS resolves /var to /private/var, which a subprocess's `pwd` would report.
 const workspace = realpathSync(mkdtempSync(join(tmpdir(), "slack-dev-test-")));
 process.env.WORKSPACE_DIR = workspace;
+// A directory OUTSIDE the workspace, for the symlink-escape tests below.
+const outside = realpathSync(mkdtempSync(join(tmpdir(), "slack-dev-outside-")));
 
 type ToolResult = Record<string, unknown>;
 /** A Strands ZodTool. `invoke` validates the input against the tool's schema, then runs it — so
@@ -48,6 +50,40 @@ describe("workspace sandboxing", () => {
     const result = await call("write_file", { path: "/tmp/escaped.txt", content: "nope" });
     expect(result.error).toMatch(/traversal/);
     expect(result.success).toBeUndefined();
+  });
+
+  // The two cases above only exercise `..` and an absolute path, which plain `resolve()` already caught.
+  // A SYMLINK was not covered and did escape: `resolve()` normalizes `..` but does not follow links, so
+  // the prefix check passed on a path whose target was elsewhere. Reachable from untrusted input — the
+  // agent clones repos into the workspace, so a committed `docs/notes.md -> /root/.aws/credentials` turned
+  // read_file into arbitrary read and write_file into arbitrary WRITE (verified: a write through a
+  // symlinked directory landed outside the workspace).
+  it("refuses to read through a symlink that points outside", async () => {
+    const secret = join(outside, "SECRET.txt");
+    writeFileSync(secret, "top secret\n");
+    symlinkSync(secret, join(workspace, "innocent.txt"));
+
+    const result = await call("read_file", { path: "innocent.txt" });
+    expect(result.error, "a symlink is the escape resolve() cannot see").toMatch(/traversal/);
+    expect(JSON.stringify(result)).not.toContain("top secret");
+  });
+
+  it("refuses to write through a symlinked directory", async () => {
+    symlinkSync(outside, join(workspace, "escape-dir"));
+
+    const result = await call("write_file", { path: "escape-dir/PWNED.txt", content: "x" });
+    expect(result.error).toMatch(/traversal/);
+    expect(existsSync(join(outside, "PWNED.txt")), "must not have written outside").toBe(false);
+  });
+
+  // The guard must not overreach: the workspace root itself is often behind a symlink (macOS /tmp ->
+  // /private/tmp, bind mounts), and comparing a REALPATH'd child against an UNresolved root refuses every
+  // legitimate write. That regression is worse than the escape, and it is what a first attempt at this
+  // fix actually did — `write_file` on a new subdirectory was rejected as traversal.
+  it("still creates files at any depth inside the workspace", async () => {
+    const result = await call("write_file", { path: "fresh/deep/nested.txt", content: "fine" });
+    expect(result.success, `legitimate create refused: ${result.error ?? ""}`).toBe(true);
+    expect(readFileSync(join(workspace, "fresh/deep/nested.txt"), "utf8")).toBe("fine");
   });
 });
 

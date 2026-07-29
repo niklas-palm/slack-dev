@@ -12,13 +12,14 @@
 // state rather than a module global on purpose: the ids belong to one message, and threading them
 // through the invocation keeps a later turn from ever replying into the wrong thread.
 import { readFileSync, statSync } from "node:fs";
-import { basename, resolve } from "node:path";
+import { basename } from "node:path";
 
 import { tool as strandsTool } from "@strands-agents/sdk";
 import { z } from "zod";
 
 import { WORKSPACE_DIR as WORKSPACE } from "./config.js";
 import { emit } from "./emit.js";
+import { safePath } from "./tools.js";
 import {
   type SlackResponse,
   type SlackTarget,
@@ -491,11 +492,13 @@ the file rather than mentioning its path.`,
     if (!turn) return NO_SLACK;
 
     try {
-      const fp = resolve(WORKSPACE, path);
-      if (fp !== WORKSPACE && !fp.startsWith(WORKSPACE + "/")) {
-        return {
-          error: `path traversal not allowed; stay inside ${WORKSPACE}`,
-        };
+      // safePath, not a local prefix check: this file had its own weaker copy, which let a symlink in a
+      // cloned repo be uploaded straight to Slack — an exfiltration primitive. One implementation.
+      let fp: string;
+      try {
+        fp = safePath(path);
+      } catch {
+        return { error: `path traversal not allowed; stay inside ${WORKSPACE}` };
       }
       const stat = statSync(fp);
       if (!stat.isFile()) return { error: `not a regular file: ${path}` };
@@ -612,9 +615,12 @@ Use read_thread first to find the file id. Only files attached to THIS thread ca
       if (!url) return { error: "Slack did not provide a download URL" };
 
       const name = basename(save_as ?? String(file.name ?? `${file_id}.bin`));
-      const fp = resolve(WORKSPACE, name);
-      if (!fp.startsWith(WORKSPACE + "/"))
+      let fp: string;
+      try {
+        fp = safePath(name); // basename already strips directories; this also refuses a symlinked name
+      } catch {
         return { error: "save_as must stay inside the workspace" };
+      }
 
       // A private file redirects to a CDN that still wants the auth header, so keep it across redirects.
       const res = await fetch(url, {

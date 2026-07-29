@@ -26,6 +26,9 @@ cfg() { node -e 'const c=require(process.argv[1]);process.stdout.write(String(c[
 NAME="$(cfg name)"
 DISPLAY_NAME="$(cfg displayName)"
 GITHUB_REPO="$(cfg githubRepo)"
+# Space-separated, NOT comma: `--environment-variables` is itself a comma-delimited Key=Value list, so a
+# two-channel allowlist would be parsed as two bogus variables. The runtime splits on either.
+ALLOWED_CHANNELS="$(node -e 'const c=require(process.argv[1]);process.stdout.write((c.allowedChannels??[]).join(" "))' "$ROOT/agent.config.json")"
 if [ -z "$NAME" ] || [ "$NAME" = "demo" ]; then
   echo "✗ Set a real \"name\" in agent.config.json first (copy agent.config.example.json). See setup.md step 2." >&2
   exit 1
@@ -96,6 +99,10 @@ ENVVARS="${ENVVARS},GH_APP_ID_PARAM=/slack-dev/${NAME}/gh-app-id"
 ENVVARS="${ENVVARS},GH_APP_INSTALL_ID_PARAM=/slack-dev/${NAME}/gh-app-install-id"
 ENVVARS="${ENVVARS},GH_APP_PRIVATE_KEY_PARAM=/slack-dev/${NAME}/gh-app-private-key"
 [ -n "$GITHUB_REPO" ] && ENVVARS="${ENVVARS},GITHUB_REPO=${GITHUB_REPO}"
+# The ingress checks this too and that is the primary gate. Baked in here as well because the in-VM
+# /invoke endpoint is unauthenticated and takes channel_id from its request body, so `run_bash` could
+# curl it and post outside the allowlist entirely (slack.ts channelAllowedHere).
+[ -n "$ALLOWED_CHANNELS" ] && ENVVARS="${ENVVARS},ALLOWED_CHANNELS=${ALLOWED_CHANNELS}"
 
 COMMON=(
   --code-artifact "uri=s3://${BUCKET}/${IMAGE_NAME}/image.zip"

@@ -112,13 +112,22 @@ export class SlackDevStack extends Stack {
       new PolicyStatement({
         // Model ARNs vary by cross-region inference profile, so `*` is the pragmatic scope here.
         //
-        // `bedrock:*` rather than the four Converse actions: the agent is often asked ABOUT Bedrock in
-        // the account it looks after (which models are enabled, why a throttle happened, what an agent
-        // or knowledge base is configured as), and ReadOnlyAccess's Bedrock coverage doesn't extend to
-        // invoking. Bedrock has no data of its own to leak — the account's data lives in the services
-        // ReadOnlyAccess already governs — so the marginal risk is spend, which the MAX_TURNS cap and
-        // the channel allowlist bound. Everything else the role can do stays read-only.
-        actions: ["bedrock:*"],
+        // Invoke + read, NOT `bedrock:*`. The agent is often asked ABOUT Bedrock in the account it looks
+        // after (which models are enabled, why a throttle happened), and ReadOnlyAccess doesn't extend to
+        // invoking — so both halves are needed. But `bedrock:*` also granted DeleteKnowledgeBase,
+        // DeleteGuardrail, CreateProvisionedModelThroughput (an expensive commitment, not "marginal
+        // spend"), PutModelInvocationLoggingConfiguration (redirect or disable audit logs), and
+        // Retrieve/RetrieveAndGenerate, which read knowledge-base CONTENTS — real data, often ingested
+        // customer documents. That falsified the role's own "read-only in AWS" claim: a prompt injection
+        // could delete a knowledge base. This account has none today, but the template ships to ones that do.
+        actions: [
+          "bedrock:InvokeModel",
+          "bedrock:InvokeModelWithResponseStream",
+          "bedrock:Converse",
+          "bedrock:ConverseStream",
+          "bedrock:Get*",
+          "bedrock:List*",
+        ],
         resources: ["*"],
       }),
     );
@@ -135,7 +144,27 @@ export class SlackDevStack extends Stack {
           "logs:PutLogEvents",
         ],
         resources: [
-          `arn:${this.partition}:logs:${this.region}:${this.account}:log-group:/aws/lambda-microvms/*`,
+          `arn:${this.partition}:logs:${this.region}:${this.account}:log-group:/aws/lambda-microvms/${agent.imageName}*`,
+        ],
+      }),
+    );
+    // Deny READING other agents' microVM logs. ReadOnlyAccess grants logs:Get*/FilterLogEvents/
+    // StartLiveTail on `*`, and those log streams contain whatever a tool printed — including, today, a
+    // minted `ghs_…` GitHub token (see the redaction in runtime/src/emit.ts). Co-tenants are real in this
+    // account, so without this one agent can harvest another's live credential from its logs. The write
+    // grant above is now scoped to this agent's own group, so PutLogEvents can't forge a co-tenant's trail.
+    vmRole.addToPrincipalPolicy(
+      new PolicyStatement({
+        effect: Effect.DENY,
+        actions: [
+          "logs:GetLogEvents",
+          "logs:FilterLogEvents",
+          "logs:StartLiveTail",
+          "logs:GetLogRecord",
+        ],
+        notResources: [
+          `arn:${this.partition}:logs:${this.region}:${this.account}:log-group:/aws/lambda-microvms/${agent.imageName}*`,
+          `arn:${this.partition}:logs:${this.region}:${this.account}:log-group:/aws/lambda-microvms/${agent.imageName}*:*`,
         ],
       }),
     );
@@ -174,17 +203,36 @@ export class SlackDevStack extends Stack {
     // to call `get_parameters_by_path(Path="/slack-dev/", WithDecryption=True)` would hand over
     // every other agent's Slack token and GitHub App private key. Only an explicit Deny beats a
     // managed Allow. `notResources` keeps this agent's own prefix readable.
+    //
+    // `ssm:Get*`, NOT a list of verbs. An earlier version denied exactly GetParameter, GetParameters and
+    // GetParametersByPath — and `ssm:GetParameterHistory` returns the DECRYPTED value of a SecureString
+    // too, so it walked straight through. Verified against the live account: it returned another agent's
+    // `xoxb-…` bot token in plaintext, and this account really does have co-tenants (`/slack-dev/agency/*`,
+    // `/slack-dev/dev/*`, plus the workspace-wide `/slack-dev/_shared/slack-config-refresh-token`).
+    // Enumerating actions means every future SSM read verb reopens the hole; the wildcard cannot.
     vmRole.addToPrincipalPolicy(
       new PolicyStatement({
         effect: Effect.DENY,
-        actions: [
-          "ssm:GetParameter",
-          "ssm:GetParameters",
-          "ssm:GetParametersByPath",
-        ],
+        actions: ["ssm:Get*"],
         notResources: [
           `arn:${this.partition}:ssm:${this.region}:${this.account}:parameter${agent.ssmPrefix}/*`,
         ],
+      }),
+    );
+
+    // And deny kms:Decrypt outside this agent's own parameters. The Allow above is conditioned on
+    // ViaService=ssm, which scopes it to SSM but NOT to a parameter — so without this, a decrypt of
+    // someone else's ciphertext through SSM is still permitted by the managed policy.
+    vmRole.addToPrincipalPolicy(
+      new PolicyStatement({
+        effect: Effect.DENY,
+        actions: ["kms:Decrypt"],
+        resources: ["*"],
+        conditions: {
+          StringNotLike: {
+            "kms:EncryptionContext:PARAMETER_ARN": `arn:${this.partition}:ssm:${this.region}:${this.account}:parameter${agent.ssmPrefix}/*`,
+          },
+        },
       }),
     );
 

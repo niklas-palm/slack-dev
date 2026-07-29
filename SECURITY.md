@@ -56,8 +56,16 @@ you extend this — and if you widen either, say so loudly in your fork.
   token lasts ~1h, the App is scoped to ONE repository, and it cannot merge, push to a protected branch,
   administer the repo, or touch any other repo. Worst realistic case is an hour of unwanted branches and
   PR comments on a repo whose source is public anyway — not a breach. `ReadOnlyAccess` grants no
-  `secretsmanager:GetSecretValue`, no `ssm:GetParameter` and no `kms:Decrypt` (verified against the AWS
-  managed policy), and the stack adds an explicit Deny so a VM can't read another agent's SSM secrets.
+  `secretsmanager:GetSecretValue` and no `kms:Decrypt` (verified against the AWS managed policy), and the
+  stack adds an explicit Deny so a VM can't read another agent's SSM secrets.
+
+  That Deny is only as good as its action list. It once named `GetParameter`, `GetParameters` and
+  `GetParametersByPath` — and `ssm:GetParameterHistory`, which also returns a decrypted SecureString,
+  walked straight through it (verified against the live account: it returned a co-tenant's `xoxb-…` token
+  in plaintext). It is now `ssm:Get*`, plus a Deny on `kms:Decrypt` outside this agent's own prefix,
+  because the ViaService condition scopes the KMS Allow to SSM but not to a parameter. **If you add an
+  agent to an account that already has one, this boundary is what separates them — an enumerated action
+  list will silently reopen it the next time AWS ships a read verb.**
 
   For calibration: this is the same trade anyone makes running a coding agent locally with a `gh` token
   or an SSH key in their shell — the agent can read the credential and reach the network, and only its

@@ -277,17 +277,20 @@ describe("the stack", () => {
         }>,
     );
     const deny = statements.find(
-      (s) =>
-        s.Effect === "Deny" &&
-        JSON.stringify(s.Action ?? "").includes("ssm:GetParameter"),
+      (s) => s.Effect === "Deny" && JSON.stringify(s.Action ?? "").includes("ssm:Get"),
     );
 
     expect(
       deny,
       "an explicit Deny on other agents' SSM parameters must exist",
     ).toBeDefined();
-    // GetParametersByPath is the dangerous one — it's how you'd enumerate the whole namespace at once.
-    expect(JSON.stringify(deny?.Action)).toContain("ssm:GetParametersByPath");
+    // Must be the WILDCARD, not a list of verbs. Enumerating them missed `ssm:GetParameterHistory`,
+    // which also returns a decrypted SecureString — verified against the live account, it handed over
+    // another agent's bot token in plaintext. Any future read verb would reopen the same hole.
+    expect(
+      deny?.Action,
+      "deny ssm:Get* — an enumerated list lets the next read action through",
+    ).toBe("ssm:Get*");
     expect(JSON.stringify(deny?.NotResource)).toContain("/slack-dev/alpha/");
   });
 
@@ -302,8 +305,10 @@ describe("the stack", () => {
           Condition?: unknown;
         }>,
     );
-    const kms = statements.filter((s) =>
-      JSON.stringify(s.Action ?? "").includes("kms:Decrypt"),
+    const kms = statements.filter(
+      (s) =>
+        JSON.stringify(s.Action ?? "").includes("kms:Decrypt") &&
+        (s as { Effect?: string }).Effect !== "Deny",
     );
 
     expect(kms.length).toBeGreaterThan(0);
@@ -313,6 +318,16 @@ describe("the stack", () => {
         "ssm.eu-west-1.amazonaws.com",
       );
     }
+
+    // ViaService scopes the Allow to SSM but NOT to a parameter, so a Deny must pin it to this agent's
+    // own prefix — otherwise decrypting a co-tenant's ciphertext through SSM is still permitted.
+    const denies = statements.filter(
+      (s) =>
+        (s as { Effect?: string }).Effect === "Deny" &&
+        JSON.stringify(s.Action ?? "").includes("kms:Decrypt"),
+    );
+    expect(denies.length, "kms:Decrypt must be denied outside this agent's parameters").toBe(1);
+    expect(JSON.stringify(denies[0]?.Condition)).toContain("/slack-dev/acme/");
   });
 
   it("gives the microVM AWS read-only access so it can investigate its own account", () => {
@@ -348,7 +363,7 @@ describe("the stack", () => {
     // table and starts VMs, and lumping the two together would let a real widening here hide.
     const { template } = synth();
     const vmPolicy = Object.values(template.findResources("AWS::IAM::Policy")).find((p) =>
-      JSON.stringify(p.Properties?.PolicyDocument ?? "").includes("bedrock:*"),
+      JSON.stringify(p.Properties?.PolicyDocument ?? "").includes("bedrock:InvokeModel"),
     );
     const statements = (
       vmPolicy?.Properties as {
@@ -360,15 +375,27 @@ describe("the stack", () => {
       .flatMap((st) => (Array.isArray(st.Action) ? st.Action : [st.Action]))
       .filter((a): a is string => typeof a === "string");
 
-    expect(allowed).toContain("bedrock:*");
+    expect(allowed).toContain("bedrock:InvokeModel");
+    // NOT `bedrock:*`. This test used to assert the wildcard was PRESENT while being named "never WRITE
+    // to the account" — and the mutation regex below omitted `bedrock:`, so the one grant that falsified
+    // the test's own name was the one it exempted. `bedrock:*` includes DeleteKnowledgeBase,
+    // DeleteGuardrail and PutModelInvocationLoggingConfiguration.
+    expect(allowed, "bedrock:* is a write grant on a read-only role").not.toContain("bedrock:*");
+
     const mutating = allowed.filter((a) =>
-      // `logs:` is excluded deliberately — the agent writes its OWN log stream, scoped to
-      // /aws/lambda-microvms/*, which is not access to the account's resources.
-      /^(cloudformation|iam|ec2|s3|dynamodb|lambda|ecs|ecr):(Create|Delete|Put|Update|Modify|Attach|PassRole|Terminate|Run)/.test(
+      // `logs:` is excluded deliberately — the agent writes its OWN log stream, scoped to its own group,
+      // which is not access to the account's resources. `bedrock:` is NOT excluded: it was, and that
+      // blind spot is exactly how `bedrock:*` survived here.
+      /^(cloudformation|iam|ec2|s3|dynamodb|lambda|ecs|ecr|bedrock):(Create|Delete|Put|Update|Modify|Attach|PassRole|Terminate|Run)/.test(
         a,
       ),
     );
     expect(mutating, "the microVM role must not be able to mutate anything").toEqual([]);
+    // A wildcard on any service defeats the check above by matching nothing.
+    expect(
+      allowed.filter((a) => a.endsWith(":*")),
+      "a service wildcard hides every mutating action behind one string",
+    ).toEqual([]);
   });
 
   it("lets the ingress run microVMs, and pass ONLY the one role", () => {

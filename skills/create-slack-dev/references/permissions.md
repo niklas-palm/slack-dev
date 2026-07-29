@@ -36,14 +36,21 @@ The runtime role (`infra/lib/stack.ts`) carries:
 
 - **`ReadOnlyAccess`** (AWS managed) — so the agent can investigate the account it's deployed in. This is
   the whole reason to deploy it beside the workload it watches.
-- **`bedrock:*`** — `ReadOnlyAccess` doesn't cover *invoking* a model, and the agent is often asked about
-  the account's own Bedrock setup (which models are enabled, why a throttle happened). Bedrock holds no
-  data of its own, so the marginal risk is spend, bounded by the 200-round-trip turn cap and the channel
-  allowlist.
+- **Bedrock invoke + read** (`InvokeModel*`, `Converse*`, `Get*`, `List*`) — `ReadOnlyAccess` doesn't cover
+  *invoking* a model, and the agent is often asked about the account's own Bedrock setup (which models are
+  enabled, why a throttle happened). **Not `bedrock:*`:** that also grants `DeleteKnowledgeBase`,
+  `DeleteGuardrail`, `PutModelInvocationLoggingConfiguration` (redirect or disable audit logs) and
+  `Retrieve`/`RetrieveAndGenerate`, which read knowledge-base *contents* — so "Bedrock holds no data of
+  its own" is wrong, and a wildcard made a prompt injection able to delete a knowledge base on a role
+  documented as read-only.
 - **`ssm:Get*` on `/slack-dev/<name>/*` only**, plus an explicit **Deny** on every other agent's
   parameters. The Deny is load-bearing, not belt-and-braces: `ReadOnlyAccess` already grants `ssm:Get*` on
   `*`, so an Allow cannot narrow it. Without the Deny, a prompt injection could read another agent's
-  private key.
+  private key. **Deny `ssm:Get*`, never a list of verbs** — an enumerated Deny missed
+  `GetParameterHistory`, which returns a decrypted SecureString just like `GetParameter`, and it was
+  verified reading a co-tenant's live bot token. A matching **Deny on `kms:Decrypt`** outside the agent's
+  own prefix is needed too, since the KMS Allow's ViaService condition scopes it to SSM but not to a
+  parameter.
 - **`kms:Decrypt`** conditioned on `kms:ViaService: ssm.<region>.amazonaws.com` — needed to read a
   SecureString, and useless for anything else.
 

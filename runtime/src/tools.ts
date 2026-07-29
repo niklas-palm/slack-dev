@@ -17,11 +17,12 @@ import {
   openSync,
   readFileSync,
   readSync,
+  realpathSync,
   statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, extname, join, relative, resolve } from "node:path";
+import { basename, dirname, extname, join, relative, resolve } from "node:path";
 
 import { BedrockRuntimeClient, ConverseCommand } from "@aws-sdk/client-bedrock-runtime";
 import { tool as strandsTool } from "@strands-agents/sdk";
@@ -56,12 +57,72 @@ const IMAGE_FORMATS: Record<string, "jpeg" | "png" | "gif" | "webp"> = {
 
 // --- helpers ---------------------------------------------------------------
 
-function safePath(rel: string | null | undefined): string {
+/**
+ * Resolve a workspace-relative path, refusing anything that lands outside it.
+ *
+ * `resolve()` alone is NOT enough: it normalizes `..` but does not follow symlinks, so a path whose
+ * final target is elsewhere passed the prefix check. That is reachable from untrusted input — the agent
+ * clones repos into the workspace, and a symlink committed in one (`docs/notes.md -> /root/.aws/
+ * credentials`) turned read_file into an arbitrary-file READ and write_file into an arbitrary-file WRITE.
+ * Verified before the fix: `link.txt` and `dirlink/OUTSIDE.txt` both escaped, and a write through a
+ * symlinked directory landed outside the workspace.
+ *
+ * So re-check the REAL path. For a file that doesn't exist yet (a create), the file itself has no real
+ * path, so resolve its parent directory instead — that is what a symlinked-directory escape abuses.
+ * Exported because slack-tools.ts needs the identical guarantee; it had its own copy of the weaker check.
+ */
+export function safePath(rel: string | null | undefined): string {
   const p = resolve(WORKSPACE, rel ?? "");
-  if (p !== WORKSPACE && !p.startsWith(WORKSPACE + "/")) {
+  const under = (candidate: string, root: string): boolean =>
+    candidate === root || candidate.startsWith(root + "/");
+
+  // Lexical: catches `..`, compared against the workspace as written.
+  if (!under(p, WORKSPACE)) throw new Error(`path traversal not allowed; stay inside ${WORKSPACE}`);
+
+  // realpath throws on any component that doesn't exist yet, and creates legitimately invent whole
+  // chains ("a/b/c.txt"). So resolve the deepest ancestor that DOES exist and re-attach the rest: a
+  // symlink can only be a component that exists, so every escape is still caught.
+  let real: string;
+  try {
+    real = realpathSync.native(p);
+  } catch {
+    let existing = dirname(p);
+    const tail: string[] = [basename(p)];
+    while (!existsSync(existing) && dirname(existing) !== existing) {
+      tail.unshift(basename(existing));
+      existing = dirname(existing);
+    }
+    try {
+      real = join(realpathSync.native(existing), ...tail);
+    } catch {
+      return p; // nothing on the path exists; the operation fails on its own terms
+    }
+  }
+  // Physical: catches symlinks, compared against the workspace RESOLVED.
+  if (!under(real, workspaceRoot())) {
     throw new Error(`path traversal not allowed; stay inside ${WORKSPACE}`);
   }
-  return p;
+  return real;
+}
+
+/**
+ * WORKSPACE with symlinks resolved, for comparing against a realpath'd child.
+ *
+ * Matters because the workspace root itself is often behind a link — macOS `/tmp` is `/private/tmp`, and
+ * a bind-mounted workspace can be too. Comparing a resolved child against an UNresolved root refuses
+ * every legitimate read, which is a worse bug than the escape it was meant to close. Memoized, and
+ * tolerant of the root not existing yet (tests point WORKSPACE_DIR at a temp dir before creating it).
+ */
+let cachedRoot: string | undefined;
+function workspaceRoot(): string {
+  if (cachedRoot === undefined) {
+    try {
+      cachedRoot = realpathSync.native(WORKSPACE);
+    } catch {
+      cachedRoot = WORKSPACE;
+    }
+  }
+  return cachedRoot;
 }
 
 // Every run_bash command starts `cd /workspace/repo`, so the natural mental model is "paths are
