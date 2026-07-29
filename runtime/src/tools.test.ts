@@ -76,6 +76,21 @@ describe("workspace sandboxing", () => {
     expect(existsSync(join(outside, "PWNED.txt")), "must not have written outside").toBe(false);
   });
 
+  // A DANGLING symlink was the half of this the first fix missed. realpathSync throws on a link whose
+  // target doesn't exist, so control fell into the create branch, which resolves the PARENT and re-attaches
+  // the link's own name — the link itself was never resolved, so the write followed it out. Reproduced:
+  // `ci.yml -> /outside/authorized_keys` with the target absent returned {"success":true} and wrote
+  // outside. This is the MORE likely shape in a cloned repo, since the target usually exists only on the
+  // author's machine.
+  it("refuses to write through a dangling symlink", async () => {
+    const target = join(outside, "authorized_keys");
+    symlinkSync(target, join(workspace, "innocent.yml")); // target deliberately absent
+
+    const result = await call("write_file", { path: "innocent.yml", content: "ssh-ed25519 ATTACKER\n" });
+    expect(result.error, "a dangling link is still a link").toMatch(/traversal/);
+    expect(existsSync(target), "must not have created the file outside").toBe(false);
+  });
+
   // The guard must not overreach: the workspace root itself is often behind a symlink (macOS /tmp ->
   // /private/tmp, bind mounts), and comparing a REALPATH'd child against an UNresolved root refuses every
   // legitimate write. That regression is worse than the escape, and it is what a first attempt at this

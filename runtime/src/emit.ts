@@ -18,7 +18,7 @@ const SECRET_PATTERNS: RegExp[] = [
   /ghp_[A-Za-z0-9]{20,}/g, // classic PAT
   /github_pat_[A-Za-z0-9_]{20,}/g, // fine-grained PAT
   /xox[baprs]-[A-Za-z0-9-]{10,}/g, // Slack bot/user/app tokens
-  /-----BEGIN[^-]*PRIVATE KEY-----[\s\S]*?-----END[^-]*PRIVATE KEY-----/g,
+  /-----BEGIN[^-]*PRIVATE KEY-----[\s\S]*?(?:-----END[^-]*PRIVATE KEY-----|$)/g,
   /x-access-token:[^@\s"']+/g, // the credential embedded in a clone URL
 ];
 
@@ -39,7 +39,11 @@ function redact(line: string): string {
   for (const name of SECRET_ENV_VARS) {
     const secret = process.env[name];
     // A short value would match everywhere and mangle unrelated output; a real credential is long.
-    if (secret && secret.length >= 12) out = out.split(secret).join("[redacted]");
+    // eslint-disable-next-line no-continue
+    if (!secret || secret.length < 12) continue;
+    out = out.split(secret).join("[redacted]");
+    const escaped = JSON.stringify(secret).slice(1, -1);
+    if (escaped !== secret) out = out.split(escaped).join("[redacted]");
   }
   for (const pattern of SECRET_PATTERNS) out = out.replace(pattern, "[redacted]");
   return out;

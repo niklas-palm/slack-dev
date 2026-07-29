@@ -2,6 +2,7 @@
 import { existsSync } from "node:fs";
 
 import {
+  AfterModelCallEvent,
   AfterToolCallEvent,
   AfterToolsEvent,
   Agent,
@@ -93,10 +94,7 @@ export function restoreInFlight(sessionId: string): void {
   emit("in_flight_restored", { session_id: sessionId, count: pending.length });
 }
 
-/** Delivery survived a model call, so it can no longer be lost by a truncation. */
-export function clearInFlight(sessionId: string): void {
-  inFlight.delete(sessionId);
-}
+
 
 export function buildAgent(sessionId: string): Agent {
   const agent = new Agent({
@@ -172,6 +170,14 @@ export function buildAgent(sessionId: string): Agent {
   // schema validation never runs its body, so its gate never opened and the whole turn hung on 🟡 until
   // the microVM was reaped. AfterToolCallEvent fires however a call ended — validation failure, a hook
   // cancelling it, an unknown tool, a throw — so it cannot be skipped.
+  // A model call that COMPLETED means anything delivered into it was answered, so it can no longer be
+  // lost by the crash-path truncation. Per call, not per turn: clearing only after runAgent returned left
+  // a round-1 correction in the map for the whole turn, and a crash on round 3 replayed it as a new turn —
+  // the person saw already-finished work done a second time. `error` is set only on the failing call.
+  agent.addHook(AfterModelCallEvent, (event) => {
+    if (!event.error) inFlight.delete(sessionId);
+  });
+
   agent.addHook(BeforeToolsEvent, (event) => {
     const turn = (
       event.invocationState as { slackTurn?: SlackTurn } | undefined

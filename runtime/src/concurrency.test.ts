@@ -20,7 +20,7 @@ process.env.WORKSPACE_DIR = realpathSync(
 );
 process.env.SLACK_BOT_TOKEN = "not-a-real-token";
 
-const { buildAgent, clearInFlight, restoreInFlight, runAgent } = await import("./agent.js");
+const { buildAgent, restoreInFlight, runAgent } = await import("./agent.js");
 const { newSlackTurn, isWaiting } = await import("./slack-tools.js");
 const { deliver, drain } = await import("./agent.js");
 const { SLACK_TOOLS } = await import("./slack-tools.js");
@@ -511,14 +511,14 @@ describe("a correction delivered to a model call that then throws", () => {
     const agent = buildAgent("crash-recovery");
     deliver("crash-recovery", "stop, wrong repo");
 
-    // One round-trip: the real BeforeModelCallEvent hook fires, empties the inbox, and records the
-    // in-flight copy. That hook is the mechanism under test.
+    // The model must THROW: a call that COMPLETES clears the in-flight copy (AfterModelCallEvent), which
+    // is correct and is what the sibling test below covers. The recovery path only matters on a crash.
     (agent.model as unknown as { stream: unknown }).stream =
       async function* (): AsyncGenerator<unknown> {
         yield new ModelMessageStartEvent({ type: "modelMessageStartEvent", role: "assistant" });
-        yield new ModelMessageStopEvent({ type: "modelMessageStopEvent", stopReason: "endTurn" });
+        throw new Error("bedrock exploded mid-stream");
       };
-    await runAgent(agent, "do the thing", "crash-recovery");
+    await expect(runAgent(agent, "do the thing", "crash-recovery")).rejects.toThrow(/exploded/);
 
     // The crash path's recovery. Without it the correction is gone from the inbox (spliced) AND from
     // agent.messages (truncated), so the drain in runTurn's `finally` requeues nothing.
@@ -537,7 +537,7 @@ describe("a correction delivered to a model call that then throws", () => {
       };
     await runAgent(agent, "do the thing", "answered");
 
-    clearInFlight("answered"); // what runTurn does on the success path
+    // The AfterModelCallEvent hook cleared it when the call above completed.
     restoreInFlight("answered"); // a LATER turn crashing must not bring it back
 
     expect(drain("answered"), "an answered correction must not be requeued").toEqual([]);
