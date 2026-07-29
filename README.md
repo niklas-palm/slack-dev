@@ -151,6 +151,14 @@ opposite (needed every turn, quoting-sensitive), which is why it's tools instead
 stack is deployed into the account it looks after, "why is the worker erroring?" is a question it can
 actually answer.
 
+**Judgement about the change itself** is in the base prompt, not left to chance. Before it commits, the
+agent takes one deliberate pass at whether the change *should* exist — right problem or just the literal
+request, what it costs in concepts and maintenance, what it might break, whether it's still one concern —
+because a change that passes its tests can still leave the product worse. What it concludes goes to the
+thread: ship quietly if it holds up, open the PR *and* name the concern if it doesn't quite, say so before
+opening anything if it thinks it's the wrong change. It flags; you decide. One pass, not a licence to
+stall.
+
 ## Guardrails
 
 - **Propose, never land.** Never pushes to the default branch, never merges, never force-pushes a shared
