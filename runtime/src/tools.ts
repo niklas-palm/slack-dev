@@ -125,6 +125,24 @@ function workspaceRoot(): string {
   return cachedRoot;
 }
 
+/**
+ * One Bedrock client for view_image, with a request timeout.
+ *
+ * The raw SDK client defaults `requestTimeout` to UNDEFINED — Strands' BedrockModel injects 120s, this
+ * one had nothing. Measured against a black-hole endpoint: the turn sat at round 1 with zero messages
+ * posted and the thread frozen on 🟡, still pending at 200s, and `running.has(sessionId)` stayed true so
+ * every later mention returned "injected" and was answered by nobody. Module-level because it was being
+ * constructed per call.
+ */
+let bedrock: BedrockRuntimeClient | undefined;
+function bedrockClient(): BedrockRuntimeClient {
+  bedrock ??= new BedrockRuntimeClient({
+    region: REGION,
+    requestHandler: { requestTimeout: 60_000 },
+  });
+  return bedrock;
+}
+
 // Every run_bash command starts `cd /workspace/repo`, so the natural mental model is "paths are
 // repo-relative" — but the file tools resolve against /workspace. Same string, two different files.
 // A real session lost a call to exactly this (`runtime/src/prompt.ts` → not found → retried as
@@ -314,6 +332,15 @@ function runChild(
       settled = true;
       clearTimeout(timer);
       clearTimeout(reap);
+      // Detach from the pipes, or an escaped grandchild keeps writing into BoundedOutput for its whole
+      // life — AFTER this tool returned to the model. The early-settle above fixes the HANG; without
+      // this it leaves the resource burn. Measured with one backgrounded `while true; do echo` (the
+      // mundane "forgot to redirect" case, not an attack): 6.3s of CPU in 3s of wall-clock — two cores
+      // — on an otherwise idle event loop, plus two leaked handles per call. On a 1-vCPU VM that starves
+      // the loop that has to serve the model round-trips and Slack calls, with nothing in the log
+      // naming the cause.
+      child.stdout?.destroy();
+      child.stderr?.destroy();
       const stdout = out.text();
       const stderr = err.text();
       done({
@@ -640,7 +667,7 @@ const viewImage = tool({
       }
       if (statSync(fp).size > MAX_FILE_SIZE) return { error: "image too large", hint: "max 5MB" };
 
-      const bedrock = new BedrockRuntimeClient({ region: REGION });
+      const bedrock = bedrockClient();
       const response = await bedrock.send(
         new ConverseCommand({
           modelId: MODEL_ID,

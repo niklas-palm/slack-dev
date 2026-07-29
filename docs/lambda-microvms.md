@@ -112,7 +112,11 @@ Also worth knowing:
 - The **execution role** needs those same three `logs:` actions. `ReadOnlyAccess` grants
   `logs:Describe*`/`Get*`/`List*` but **not** `CreateLogStream` or `PutLogEvents`, so without an explicit
   grant every log line the agent emits is silently dropped — which hides every other failure.
-- Both roles are assumed by `lambda.amazonaws.com`, with `sts:AssumeRole` **and `sts:TagSession`**.
+- Both roles are assumed by `lambda.amazonaws.com`. The **build** role's trust policy also allows
+  `sts:TagSession` (`build.sh` sets it); the **execution** role does NOT need it — CDK's `assumedBy`
+  emits `sts:AssumeRole` alone, and the deployed role has only that while `run-microvm` works fine.
+  Verified against the live role, not inferred: don't "fix" the stack to match an earlier version of
+  this line, which claimed both roles required it.
 - A role created seconds before its first `run-microvm` can fail with *"We were unable to assume the role
   provided"* — that's IAM propagation, not a wrong trust policy. Retry before debugging.
 

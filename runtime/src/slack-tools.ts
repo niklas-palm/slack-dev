@@ -628,6 +628,9 @@ Use read_thread first to find the file id. Only files attached to THIS thread ca
           Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN ?? ""}`,
         },
         redirect: "follow",
+        // fetch has no default timeout: a hung CDN socket was measured burning 301s of a turn — long
+        // enough that the VM idle-suspends mid-flight and thaws into a dead socket.
+        signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
       });
       if (!res.ok) return { error: `download failed with HTTP ${res.status}` };
       const bytes = Buffer.from(await res.arrayBuffer());

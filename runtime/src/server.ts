@@ -370,7 +370,15 @@ const server = createServer((req, res) => {
               turn.target,
               ":warning: My sandbox was reclaimed before I finished. Mention me again and I'll pick this up — I'll have lost the earlier context, so a one-line recap helps.",
             ).catch(() => undefined);
-            await setThreadStatus(turn.target, "failed").catch(() => undefined);
+            // Terminal reaction on THIS turn's own messages only — courtesy reactions on folded-in
+            // mentions are dropped here. setThreadStatus loops timestamps serially (4 calls each), so
+            // with the alsoReactTo cap full one session can spend most of the 45s budget on reactions
+            // while other sessions get no notice at all. The MESSAGE above is the part that matters;
+            // this is the one path where the trade is clearly worth it.
+            await setThreadStatus(
+              { ...turn.target, alsoReactTo: undefined },
+              "failed",
+            ).catch(() => undefined);
           }),
         );
         const finished = await Promise.race([
