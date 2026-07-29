@@ -42,7 +42,7 @@ import {
 } from "aws-cdk-lib/aws-iam";
 import { Architecture, Runtime } from "aws-cdk-lib/aws-lambda";
 import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
-import { LogGroup, RetentionDays } from "aws-cdk-lib/aws-logs";
+import { LogGroup, LogRetention, RetentionDays } from "aws-cdk-lib/aws-logs";
 import { StringParameter } from "aws-cdk-lib/aws-ssm";
 import type { Construct } from "constructs";
 
@@ -242,6 +242,23 @@ export class SlackDevStack extends Stack {
       parameterName: `${agent.ssmPrefix}/microvm-role-arn`,
       stringValue: vmRole.roleArn,
       description: `Execution role for the ${agent.name} agent's microVMs.`,
+    });
+
+    // Expire the agent's own logs. This group holds every `tool_input`/`tool_result` — file contents and
+    // command output — so keeping it for ever is both a bill and a hazard: anything the redaction in
+    // runtime/src/emit.ts ever misses would sit in CloudWatch indefinitely. 14 days is far longer than
+    // any debugging window (a thread's VM lives at most 8h).
+    //
+    // `LogRetention`, NOT `new LogGroup(...)`: the microVM service creates this group implicitly on
+    // first write — build logs and VM logs both land in it — so CloudFormation cannot own it. Declaring
+    // it would fail with "already exists" for every agent that has ever run. LogRetention is the
+    // supported way to set a policy on a group you don't own, and it creates the group when it doesn't
+    // exist yet, which covers a fresh account too. It does provision a small singleton helper Lambda —
+    // the cost the `logRetention` prop comment below rejects for the ingress function, and worth paying
+    // here because the alternative is imperative and needs a wider CI role.
+    new LogRetention(this, "MicroVmLogRetention", {
+      logGroupName: `/aws/lambda-microvms/${agent.imageName}`,
+      retention: RetentionDays.TWO_WEEKS,
     });
 
     // --- The Slack trigger -------------------------------------------------

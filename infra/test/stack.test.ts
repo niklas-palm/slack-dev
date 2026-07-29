@@ -190,6 +190,18 @@ describe("the stack", () => {
     expect(build).toContain("--additional-os-capabilities ALL");
   });
 
+  it("expires the agent's own microVM logs", () => {
+    // That group holds every tool_result — file contents, command output — and an implicitly created
+    // group keeps them FOR EVER. Verified in the live account before this fix:
+    // /aws/lambda-microvms/slack-dev-* had no retention while this stack's ingress group had 30 days.
+    // The service owns the group's name, so this is a retention policy on a group CDK didn't create.
+    const { template } = synth({ name: "retentiontest" });
+    template.hasResourceProperties("Custom::LogRetention", {
+      LogGroupName: "/aws/lambda-microvms/slack-dev-retentiontest",
+      RetentionInDays: 14,
+    });
+  });
+
   it("passes the channel allowlist to the ingress Lambda", () => {
     // A config value that never reaches the template is a silent security hole: the deploy succeeds,
     // the docs claim the agent is restricted, and every channel still works.

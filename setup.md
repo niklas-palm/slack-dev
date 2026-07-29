@@ -336,6 +336,11 @@ That hits the real deployed runtime and model; the answer lands in the logs (the
 
 ## 8. Where to look when something's wrong
 
+Both log groups expire: the ingress after 30 days, the agent's own after **14** (the stack sets it — the
+microVM service creates that group implicitly, and an implicitly created group would otherwise keep every
+`tool_result`, file contents included, for ever). So debug from the recent past, and copy out anything you
+want to keep.
+
 ```bash
 # The agent's own logs — every tool call and its result
 env -u AWS_PROFILE aws logs tail /aws/lambda-microvms/slack-dev-<name> \
