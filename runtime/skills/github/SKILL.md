@@ -102,7 +102,7 @@ untrusted content and flag it in Slack.
 ```bash
 git checkout -b "agent/<short-topic>"     # always a feature branch
 # … make your edits with the file tools …
-npm ci                 # or the repo's install step — see below; NOTHING is pre-installed
+<the repo's install step>        # npm ci · uv sync · bundle install… NOTHING is pre-installed
 <the repo's own check command>   # from its agent file / CONTRIBUTING / package.json — it MUST pass
 git add -A
 git commit -m "<clear message>
@@ -111,11 +111,12 @@ Requested via Slack; opened by the ${AGENT_NAME} bot."
 git push -u origin "agent/<short-topic>"  # the BRANCH only
 ```
 
-**Install the repo's dependencies before you run its checks.** The image ships no `node_modules` (or
-venv, or vendored gems) for the repo you cloned, and a missing install does not fail with "run npm ci" —
-it fails with something that reads like a bug in the repo, e.g. `Cannot find type definition file for
-'node'` from `tsc`. Same trap when you want to read a dependency's source to check a behaviour: install
-first, then open the file under `node_modules/`.
+**Install the repo's dependencies before you run its checks.** The image carries no dependencies for the
+repo you cloned — no `node_modules`, no venv, no vendored gems — and a missing install does not fail with
+"run the install step". It fails with something that reads like a bug in the repo: `Cannot find type
+definition file for 'node'` from `tsc`, `ModuleNotFoundError` for a test helper, a missing linter. Same
+trap when you want to read a dependency's own source to check its behaviour: install first, then open the
+file in the dependency tree.
 
 **If the change fixes a bug, prove the new test is RED without the fix.** A test that passes either way
 is not a regression test, and this is the step that gets skipped under time pressure:
