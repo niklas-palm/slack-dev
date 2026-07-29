@@ -65,6 +65,13 @@ describe("the system prompt", () => {
     expect(prompt).toMatch(/not a licence to stall/);
   });
 
+  // The runtime injects the App credentials and nothing else: GH_TOKEN is minted by the agent itself in
+  // the github skill. The prompt used to say it was already in the environment, and a live session spent
+  // turns hunting a variable that never existed.
+  it("does not claim GH_TOKEN is pre-set in the environment", () => {
+    expect(prompt).toMatch(/`GH_TOKEN` is NOT/);
+  });
+
   it("tells the agent to sequence mutating calls, since tools run concurrently by default", () => {
     expect(prompt).toMatch(/Run anything that MUTATES state sequentially/);
   });
