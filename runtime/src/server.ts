@@ -62,19 +62,6 @@ async function handleInvoke(
     return { status: gate.status, body: { status: "rejected", error: gate.error } };
   }
 
-  // A Slack payload naming a channel this agent may not post in is REFUSED here, loudly, rather than
-  // silently yielding an undefined target. Getting that wrong is worse than the bug it guards: the target
-  // would be undefined, `if (!slackTurn) return` below would skip every fallback, and a full model call
-  // would run and be billed while the person sat on a bare 👀 for ever — no message, no colour, nothing.
-  // A non-200 instead lets the INGRESS report the failure, which is the component that has the token.
-  //
-  // Note the two copies of the allowlist have different update paths (the ingress reads the CDK task env,
-  // the runtime reads the baked image), so a skew is a live possibility — see docs/iterating.md.
-  if (body.slack != null && !slackTurnFromPayload(body.slack)) {
-    emit("invoke_refused", { session_id: sessionId, status: 403, error: "channel not allowed" });
-    return { status: 403, body: { status: "rejected", error: "channel not allowed for this agent" } };
-  }
-
   // The Slack ids go into per-turn STATE that the Slack tools read — never into the prompt. The model
   // therefore has no way to name a channel, so it can only ever reply where it was summoned.
   const slackTurn = slackTurnFromPayload(body.slack);
