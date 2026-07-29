@@ -265,15 +265,26 @@ describe("run_bash", () => {
   });
 
   // Regression: stdin defaulted to a pipe nobody would ever write to or close, so any command that
-  // reads stdin when it isn't a TTY blocked until the timeout killed it. This is the real command from
-  // a real session — `ls && rg -n "…" -l` (no path arg) burned the full 120s default and returned
-  // exit_code -1. Also hit a bare grep/cat/sort and ANY pipeline whose last stage reads stdin, which is
-  // a very common agent pattern. A 2s timeout here is ~15x the fixed cost and fails loudly if it regresses.
+  // reads stdin when it isn't a TTY blocked until the timeout killed it. The real session case was
+  // `ls && rg -n "…" -l` (no path arg), which burned the full 120s default and returned exit_code -1;
+  // a bare grep/cat/sort and ANY pipeline whose last stage reads stdin hang the same way, and that last
+  // shape is a very common agent pattern.
+  //
+  // Uses `grep -r`, not `rg`: ripgrep is in the microVM image but not on a CI runner, and the point of
+  // this test is the stdin plumbing, not which search tool is installed. Same failure mode either way —
+  // a search with no file argument reads stdin. A 2s timeout is ~15x the real cost, so a regression is
+  // unambiguous rather than flaky.
   it("does not hang on a command that reads stdin", async () => {
     writeFileSync(join(workspace, "haystack.txt"), "needle\n");
-    const result = await call("run_bash", { command: 'rg -n "needle" -l', timeout: 2 });
+    const result = await call("run_bash", { command: 'grep -rl "needle" .', timeout: 2 });
     expect(result.success, `stdin left open: ${result.error_summary ?? ""}`).toBe(true);
     expect(String(result.stdout)).toContain("haystack.txt");
+  });
+
+  // The bare form with NO path at all — the shape that actually reads stdin and hung.
+  it("does not hang on a search with no path argument", async () => {
+    const result = await call("run_bash", { command: 'grep "needle"', timeout: 2 });
+    expect(String(result.error_summary ?? "")).not.toMatch(/timed out/);
   });
 
   it("does not hang on a pipeline whose last stage reads stdin", async () => {
