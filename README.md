@@ -167,8 +167,9 @@ stall.
   otherwise) but cannot merge.
 - **Read-only in AWS, plus Bedrock.** It cannot create, modify, or delete a resource, or read another
   agent's secrets. An infra fix is therefore a PR, not an apply, and no prompt injection can mutate the
-  account. Bedrock is unrestricted because the agent is often asked about the account's own Bedrock
-  setup, and Bedrock holds no data of its own.
+  account. Bedrock is invoke + read (`InvokeModel*`, `Converse*`, `Get*`/`List*`) so the agent can also
+  answer questions about the account's own Bedrock setup — but **not `bedrock:*`**, which would grant
+  `DeleteKnowledgeBase` and `Retrieve` on a role documented as read-only.
 - **Answers only in approved channels** (`allowedChannels`), checked in the ingress before any reaction
   or model call — so a mention from elsewhere is inert, not merely refused.
 - **Secrets reach the runtime as SSM parameter *paths***; values never enter the template, and the prompt
@@ -214,7 +215,7 @@ Harden command execution before pointing this at untrusted users.
 │   │   ├── slack-tools.ts the agent's Slack surface (thread-bound)
 │   │   ├── slack.ts      the runtime's own Slack calls: status + fallback
 │   │   ├── secrets.ts    SSM SecureString → process.env
-│   │   ├── emit.ts       one structured JSON log line per event
+│   │   ├── emit.ts       one structured JSON log line per event — and the redaction chokepoint
 │   │   ├── local.ts      run one turn locally, no Slack and no deploy
 │   │   └── config.ts     invariants (region, model) + deploy values
 │   └── Dockerfile        AL2023: docker, node, python, git, gh, aws, jq, ripgrep
@@ -291,7 +292,7 @@ before changing `slack-tools.ts` or a runtime dependency. **Working on this with
   radius, and the fix if it doesn't suit you are in [SECURITY.md](./SECURITY.md).
 - **Cost is per warm thread.** Each Slack thread runs a 4 GB microVM that suspends after 45 minutes idle
   (compute billing stops) and is terminated at 8h. So you pay for minutes of active work per thread, not
-  for the whole day — but an agent left thinking in ten threads is ten VMs. Tune `idleSessionTimeout`
+  for the whole day — but an agent left thinking in ten threads is ten VMs. Tune `IDLE_SESSION_SECONDS`
   (`infra/lib/config.ts`) and the memory in `infra/microvm/build.sh`.
   **Careful lowering it:** idle is measured by *inbound* traffic only, so a turn that runs longer than the
   window is suspended mid-work and thaws into an error. See

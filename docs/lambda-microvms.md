@@ -112,7 +112,11 @@ Also worth knowing:
 - The **execution role** needs those same three `logs:` actions. `ReadOnlyAccess` grants
   `logs:Describe*`/`Get*`/`List*` but **not** `CreateLogStream` or `PutLogEvents`, so without an explicit
   grant every log line the agent emits is silently dropped — which hides every other failure.
-- Both roles are assumed by `lambda.amazonaws.com`, with `sts:AssumeRole` **and `sts:TagSession`**.
+- Both roles are assumed by `lambda.amazonaws.com`. The **build** role's trust policy also allows
+  `sts:TagSession` (`build.sh` sets it); the **execution** role does NOT need it — CDK's `assumedBy`
+  emits `sts:AssumeRole` alone, and the deployed role has only that while `run-microvm` works fine.
+  Verified against the live role, not inferred: don't "fix" the stack to match an earlier version of
+  this line, which claimed both roles required it.
 - A role created seconds before its first `run-microvm` can fail with *"We were unable to assume the role
   provided"* — that's IAM propagation, not a wrong trust policy. Retry before debugging.
 
@@ -184,7 +188,7 @@ process. So a VM working hard on a single request looks completely idle:
 There is no keep-alive from inside — the VM cannot generate inbound traffic to itself through the proxy.
 The mitigations are (a) set the idle window comfortably above your longest plausible request, and (b) log
 at the `suspend` hook when work is in flight, so the symptom is diagnosable. This project does both
-(`idleSessionTimeout` in `infra/lib/config.ts`; `suspended_mid_turn` in `runtime/src/server.ts`).
+(`IDLE_SESSION_SECONDS` in `infra/lib/config.ts`; `suspended_mid_turn` in `runtime/src/server.ts`).
 
 Resources default to 2 GB / 1 vCPU; `--resources minimumMemoryInMiB=8192` gives 8 GB / 4 vCPU.
 

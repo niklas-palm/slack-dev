@@ -117,6 +117,7 @@ export function verifySignature(
   nowMs: number = Date.now(),
 ): boolean {
   if (!signature || !timestamp) return false;
+  if (!/^\d{1,10}$/.test(timestamp)) return false; // Number() would take " 17…", "0x68…", "1e9"
   const seconds = Number(timestamp);
   if (!Number.isFinite(seconds) || Math.abs(nowMs / 1000 - seconds) > 300)
     return false; // 5-min replay window

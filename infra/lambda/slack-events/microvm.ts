@@ -141,7 +141,7 @@ export async function terminateMicrovm(microvmId: string): Promise<void> {
  * bare string — a `--query authToken --output text` CLI call flattens it, which is why ad-hoc curl
  * tests work while code gets `undefined`.
  */
-export async function authToken(
+async function authToken(
   microvmId: string,
   port: number,
 ): Promise<string> {

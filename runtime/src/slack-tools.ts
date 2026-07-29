@@ -12,13 +12,13 @@
 // state rather than a module global on purpose: the ids belong to one message, and threading them
 // through the invocation keeps a later turn from ever replying into the wrong thread.
 import { readFileSync, statSync } from "node:fs";
-import { basename, resolve } from "node:path";
+import { basename } from "node:path";
 
 import { tool as strandsTool } from "@strands-agents/sdk";
 import { z } from "zod";
 
-import { WORKSPACE_DIR as WORKSPACE } from "./config.js";
 import { emit } from "./emit.js";
+import { safePath } from "./tools.js";
 import {
   type SlackResponse,
   type SlackTarget,
@@ -78,7 +78,7 @@ export interface SlackTurn {
     {
       name: string;
       done: Promise<void>;
-      settle: (ok: boolean) => void;
+      settle: () => void;
       /** Whether the call succeeded. Undefined until it settles. */
       ok?: boolean;
     }
@@ -151,7 +151,7 @@ export function declarePending(
   toolUseId: string,
   name: string,
 ): void {
-  let settle = (_ok: boolean): void => {};
+  let settle = (): void => {};
   const done = new Promise<void>((resolve) => {
     settle = () => resolve();
   });
@@ -170,7 +170,7 @@ export function finishPending(
   const entry = turn.pending.get(toolUseId);
   if (entry) {
     entry.ok = ok;
-    entry.settle(ok);
+    entry.settle();
   }
 }
 
@@ -491,11 +491,15 @@ the file rather than mentioning its path.`,
     if (!turn) return NO_SLACK;
 
     try {
-      const fp = resolve(WORKSPACE, path);
-      if (fp !== WORKSPACE && !fp.startsWith(WORKSPACE + "/")) {
-        return {
-          error: `path traversal not allowed; stay inside ${WORKSPACE}`,
-        };
+      // safePath, not a local prefix check: this file had its own weaker copy, which let a symlink in a
+      // cloned repo be uploaded straight to Slack — an exfiltration primitive. One implementation.
+      let fp: string;
+      try {
+        fp = safePath(path);
+      } catch (e) {
+        // Forward safePath's own message rather than rebuilding it: two copies of the same string in two
+        // files is exactly the drift this change was meant to remove.
+        return { error: e instanceof Error ? e.message : String(e) };
       }
       const stat = statSync(fp);
       if (!stat.isFile()) return { error: `not a regular file: ${path}` };
@@ -513,13 +517,17 @@ the file rather than mentioning its path.`,
         filename: name,
         length: String(stat.size),
       });
-      if (!reserved.ok)
+      if (!reserved.ok) {
+        turn.failedPosts++;
         return { error: reserved.error, hint: scopeHint(reserved.error) };
+      }
 
       const uploadUrl = String(reserved.upload_url ?? "");
       const fileId = String(reserved.file_id ?? "");
-      if (!uploadUrl || !fileId)
+      if (!uploadUrl || !fileId) {
+        turn.failedPosts++;
         return { error: "Slack did not return an upload URL" };
+      }
 
       // A timeout like every Slack call has (slack.ts): this raw PUT is the one request that used to
       // have none, and set_thread_status waits on this tool — so a stalled socket parked the whole turn.
@@ -529,7 +537,10 @@ the file rather than mentioning its path.`,
         body: new Uint8Array(readFileSync(fp)),
         signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
       });
-      if (!put.ok) return { error: `upload failed with HTTP ${put.status}` };
+      if (!put.ok) {
+        turn.failedPosts++;
+        return { error: `upload failed with HTTP ${put.status}` };
+      }
 
       // The completion call and the `replied` write it justifies share the lock, like every other
       // state mutation.
@@ -612,9 +623,12 @@ Use read_thread first to find the file id. Only files attached to THIS thread ca
       if (!url) return { error: "Slack did not provide a download URL" };
 
       const name = basename(save_as ?? String(file.name ?? `${file_id}.bin`));
-      const fp = resolve(WORKSPACE, name);
-      if (!fp.startsWith(WORKSPACE + "/"))
+      let fp: string;
+      try {
+        fp = safePath(name); // basename already strips directories; this also refuses a symlinked name
+      } catch {
         return { error: "save_as must stay inside the workspace" };
+      }
 
       // A private file redirects to a CDN that still wants the auth header, so keep it across redirects.
       const res = await fetch(url, {
@@ -622,6 +636,9 @@ Use read_thread first to find the file id. Only files attached to THIS thread ca
           Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN ?? ""}`,
         },
         redirect: "follow",
+        // fetch has no default timeout: a hung CDN socket was measured burning 301s of a turn — long
+        // enough that the VM idle-suspends mid-flight and thaws into a dead socket.
+        signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
       });
       if (!res.ok) return { error: `download failed with HTTP ${res.status}` };
       const bytes = Buffer.from(await res.arrayBuffer());

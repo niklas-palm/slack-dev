@@ -2,7 +2,7 @@
 // scripted model. Note: this does NOT reproduce the executor's inter-tool microtask gap, so it wouldn't
 // catch a timing-based mechanism; the code deliberately no longer depends on timing.
 
-import { mkdtempSync, realpathSync } from "node:fs";
+import { mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -20,7 +20,7 @@ process.env.WORKSPACE_DIR = realpathSync(
 );
 process.env.SLACK_BOT_TOKEN = "not-a-real-token";
 
-const { buildAgent, runAgent } = await import("./agent.js");
+const { buildAgent, clearInFlight, restoreInFlight, runAgent } = await import("./agent.js");
 const { newSlackTurn, isWaiting } = await import("./slack-tools.js");
 const { deliver, drain } = await import("./agent.js");
 const { SLACK_TOOLS } = await import("./slack-tools.js");
@@ -428,6 +428,61 @@ describe("a declared reply the executor rejects before its body runs", () => {
   });
 });
 
+describe("a declared reply the executor rejects, alongside one that posted", () => {
+  // The OTHER half of postFailedThisBatch. The test above covers a schema-rejected reply on its own, so
+  // nothing posted and `replied` stayed false — the runtime's fallback catches that. This is the case
+  // that hides: a sibling reply DID post, so `replied` is true and the status went terminal, and the
+  // rejected one is silently dropped. `failedPosts` can't see it (the body never ran, so nothing counted
+  // it), which is exactly why postFailedThisBatch also reads `p.ok === false` from the hook. Verified
+  // red: reducing that function to `return turn.failedPosts > 0` ends this turn at one round.
+  it("still gets another round, so the lost message can be retried", async () => {
+    const { turn, rounds } = await runBatch([
+      { name: "reply_to_thread", input: { text: "PART 1" } },
+      { name: "reply_to_thread", input: { text: "" } },
+      { name: "set_thread_status", input: { status: "done" } },
+    ]);
+
+    expect(turn.replied, "the surviving reply posted").toBe(true);
+    expect(rounds, "a reply that never ran must not end the turn").toBeGreaterThan(1);
+  });
+});
+
+// upload_file counted a failure only on the LAST step (completeUploadExternal). An upload that died
+// earlier — getUploadURLExternal refused, no upload_url, the PUT non-2xx — returned a plain {error},
+// which the SDK reports as a SUCCESSFUL call, so postFailedThisBatch stayed false and the turn went 🟢
+// with the file silently lost. The person was told "report attached" and got no attachment.
+describe("an upload that fails before the final step", () => {
+  it("keeps the turn open like any other failed post", async () => {
+    writeFileSync(join(process.env.WORKSPACE_DIR!, "report.txt"), "the report\n");
+    const { turn, rounds } = await runBatch(
+      [
+        { name: "reply_to_thread", input: { text: "Report attached." } },
+        { name: "upload_file", input: { path: "report.txt" } },
+        { name: "set_thread_status", input: { status: "done" } },
+      ],
+      () => failing.add("files.getUploadURLExternal"),
+    );
+
+    expect(turn.failedPosts, "an upload that never reached Slack is a failed post").toBeGreaterThan(0);
+    expect(rounds, "the model needs a round to retry the lost file").toBeGreaterThan(1);
+  });
+
+  it("counts a failure at the completion step too", async () => {
+    writeFileSync(join(process.env.WORKSPACE_DIR!, "report2.txt"), "the report\n");
+    const { turn, rounds } = await runBatch(
+      [
+        { name: "reply_to_thread", input: { text: "Report attached." } },
+        { name: "upload_file", input: { path: "report2.txt" } },
+        { name: "set_thread_status", input: { status: "done" } },
+      ],
+      () => failing.add("files.completeUploadExternal"),
+    );
+
+    expect(turn.failedPosts).toBeGreaterThan(0);
+    expect(rounds, "a file that never completed is still a lost file").toBeGreaterThan(1);
+  });
+});
+
 describe("turn state versus what Slack shows", () => {
   it("never records a status whose reaction Slack rejected", async () => {
     const { turn, reactions } = await runBatch(
@@ -443,6 +498,49 @@ describe("turn state versus what Slack shows", () => {
     // fallback and the thread ends with no colour at all.
     expect(turn.status).not.toBe("done");
     expect(reactions.size).toBe(0);
+  });
+});
+
+// Delivery and crash-recovery used to destroy each other. BeforeModelCallEvent splices the inbox EMPTY
+// and pushes the correction into agent.messages, so that push is the ONLY copy — and runTurn's catch
+// truncates agent.messages back to historyLength, taking it with it. drain() then found nothing, no
+// follow-up turn was queued, and the person was told "mention me again" — where a retry re-runs the
+// original request their correction was cancelling. agent.ts's header calls that the worst outcome.
+describe("a correction delivered to a model call that then throws", () => {
+  it("survives the crash so the runtime can requeue it", async () => {
+    const agent = buildAgent("crash-recovery");
+    deliver("crash-recovery", "stop, wrong repo");
+
+    // One round-trip: the real BeforeModelCallEvent hook fires, empties the inbox, and records the
+    // in-flight copy. That hook is the mechanism under test.
+    (agent.model as unknown as { stream: unknown }).stream =
+      async function* (): AsyncGenerator<unknown> {
+        yield new ModelMessageStartEvent({ type: "modelMessageStartEvent", role: "assistant" });
+        yield new ModelMessageStopEvent({ type: "modelMessageStopEvent", stopReason: "endTurn" });
+      };
+    await runAgent(agent, "do the thing", "crash-recovery");
+
+    // The crash path's recovery. Without it the correction is gone from the inbox (spliced) AND from
+    // agent.messages (truncated), so the drain in runTurn's `finally` requeues nothing.
+    restoreInFlight("crash-recovery");
+    expect(drain("crash-recovery"), "the correction must be recoverable").toEqual(["stop, wrong repo"]);
+  });
+
+
+  it("does not resurrect a correction a completed run already answered", async () => {
+    const agent = buildAgent("answered");
+    deliver("answered", "use the other branch");
+    (agent.model as unknown as { stream: unknown }).stream =
+      async function* (): AsyncGenerator<unknown> {
+        yield new ModelMessageStartEvent({ type: "modelMessageStartEvent", role: "assistant" });
+        yield new ModelMessageStopEvent({ type: "modelMessageStopEvent", stopReason: "endTurn" });
+      };
+    await runAgent(agent, "do the thing", "answered");
+
+    clearInFlight("answered"); // what runTurn does on the success path
+    restoreInFlight("answered"); // a LATER turn crashing must not bring it back
+
+    expect(drain("answered"), "an answered correction must not be requeued").toEqual([]);
   });
 });
 

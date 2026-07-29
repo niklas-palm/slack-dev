@@ -14,7 +14,7 @@ import { createServer } from "node:http";
 
 import { type Agent, ContextWindowOverflowError } from "@strands-agents/sdk";
 
-import { buildAgent, deliver, drain, runAgent } from "./agent.js";
+import { buildAgent, clearInFlight, deliver, drain, restoreInFlight, runAgent } from "./agent.js";
 import { HOOK_PORT } from "./config.js";
 import { emit } from "./emit.js";
 import { invokeGate } from "./invoke-gate.js";
@@ -164,6 +164,9 @@ async function runTurn(args: {
       args.sessionId,
       slackTurn,
     );
+    // The run completed, so any injected correction was actually answered — drop the recovery copy, or
+    // the drain in `finally` would requeue a message the agent has already dealt with.
+    clearInFlight(args.sessionId);
     emit("session_end", {
       session_id: args.sessionId,
       answer,
@@ -211,6 +214,11 @@ async function runTurn(args: {
     // The turn died. The agent can't apologize, so the runtime does it and marks the thread 🔴.
     reportError(err);
     agent.messages.length = historyLength; // drop the orphaned user message (see above)
+    // That truncation also removes a correction the injection hook pushed in, and the hook already
+    // emptied the inbox — so without this the only copy is gone and the finally block below drains
+    // nothing. The person would be told to mention again, and the retry would re-run the very request
+    // the correction was cancelling.
+    restoreInFlight(args.sessionId);
 
     // A context-window overflow is permanent for this session: the history is already too long, so
     // every retry hits the same wall. Drop the Agent so a follow-up mention starts clean instead of
@@ -370,7 +378,15 @@ const server = createServer((req, res) => {
               turn.target,
               ":warning: My sandbox was reclaimed before I finished. Mention me again and I'll pick this up — I'll have lost the earlier context, so a one-line recap helps.",
             ).catch(() => undefined);
-            await setThreadStatus(turn.target, "failed").catch(() => undefined);
+            // Terminal reaction on THIS turn's own messages only — courtesy reactions on folded-in
+            // mentions are dropped here. setThreadStatus loops timestamps serially (4 calls each), so
+            // with the alsoReactTo cap full, one session can spend most of the 45s budget on reactions
+            // while other sessions get no notice at all. The MESSAGE above is the part that matters;
+            // this is the one path where the trade is clearly worth it.
+            await setThreadStatus(
+              { ...turn.target, alsoReactTo: undefined },
+              "failed",
+            ).catch(() => undefined);
           }),
         );
         const finished = await Promise.race([

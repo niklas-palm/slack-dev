@@ -18,6 +18,26 @@ export const REPO_ROOT = join(
  *  See docs/lambda-microvms.md. */
 export const REGION = "eu-west-1";
 
+/**
+ * Seconds a thread's microVM may sit IDLE before it suspends. Not its lifetime — that's a fixed 8h
+ * (the service ceiling), and suspending doesn't shorten it: a suspended VM auto-resumes on the next
+ * mention with its memory, and therefore the whole conversation, intact.
+ *
+ * This is the cost knob. Compute billing stops while suspended, so a thread costs for the time it is
+ * actually being worked on rather than the whole 8h window. Setting it TO 8h would mean a VM can never
+ * suspend before it's terminated — every thread billing the full window.
+ *
+ * But it also has a FLOOR. The idle timer counts inbound traffic through the proxy endpoint only, and a
+ * turn in flight generates none (its work is all outbound: Bedrock, git, the Slack API). So a turn
+ * running longer than this window is suspended mid-flight and thaws into a dead socket on the next
+ * mention — a spurious error after a long silence. `run_bash` alone permits 900s per call, so keep this
+ * comfortably above the longest turn you expect. 45 min bounds cost while leaving real headroom.
+ *
+ * A module constant, not a field on AgentConfig: it sat there with a 30-line comment while loadConfig
+ * hardcoded it and never read it from the file, so setting it in agent.config.json silently did nothing.
+ */
+export const IDLE_SESSION_SECONDS = 2_700;
+
 export interface AgentConfig {
   /** Short slug identifying this agent. Derives the stack name and the SSM prefix. */
   name: string;
@@ -40,22 +60,6 @@ export interface AgentConfig {
   ssmPrefix: string;
   /** The microVM image name — `npm run image` registers `slack-dev-<name>`. */
   imageName: string;
-  /**
-   * Seconds a thread's microVM may sit IDLE before it suspends. Not its lifetime — that's a fixed 8h
-   * (the service ceiling), and suspending doesn't shorten it: a suspended VM auto-resumes on the next
-   * mention with its memory, and therefore the whole conversation, intact.
-   *
-   * This is the cost knob. Compute billing stops while suspended, so a thread costs for the time it is
-   * actually being worked on rather than the whole 8h window. Setting it TO 8h would mean a VM can never
-   * suspend before it's terminated — every thread billing the full window.
-   *
-   * But it also has a FLOOR. The idle timer counts inbound traffic through the proxy endpoint only, and a
-   * turn in flight generates none (its work is all outbound: Bedrock, git, the Slack API). So a turn
-   * running longer than this window is suspended mid-flight and thaws into a dead socket on the next
-   * mention — a spurious error after a long silence. `run_bash` alone permits 900s per call, so keep this
-   * comfortably above the longest turn you expect. 45 min bounds cost while leaving real headroom.
-   */
-  idleSessionTimeout: number;
 }
 
 // The slug feeds a CloudFormation stack name, an SSM path, and a microVM image name, so keep it to the
@@ -142,6 +146,5 @@ export function loadConfig(root: string = REPO_ROOT): AgentConfig {
     stackName: `SlackDev-${name.replace(/(^|-)([a-z0-9])/g, (_, __, c: string) => c.toUpperCase())}`,
     ssmPrefix: `/slack-dev/${name}`,
     imageName: `slack-dev-${name}`,
-    idleSessionTimeout: 2_700,
   };
 }

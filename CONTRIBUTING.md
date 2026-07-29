@@ -86,6 +86,18 @@ failure of the real closing sequence look like the second — otherwise a good a
 ⚠️), and giving up is the right trade because the reply has already landed and the runtime attempts the
 reaction again at turn end. If Slack refuses permanently, the honest outcome is a reply with **no colour**.
 
+One thing has shifted under this since it was written: `slackCall` now retries a `ratelimited` response
+once, honouring `Retry-After`. So the transient case is absorbed a layer below, and `statusFailed` is left
+handling what it was really about — a PERMANENT refusal like `message_not_found`.
+
+**4. Don't lose a correction on the crash path (`inFlight`).** `BeforeModelCallEvent` splices the inbox
+EMPTY and pushes the delivered text into `agent.messages`, so that push becomes the only copy — and
+`runTurn`'s catch truncates `agent.messages` back to `historyLength`, taking it with it. `drain()` then
+found nothing, no follow-up turn was queued, and the person was told "mention me again", where a retry
+re-runs the very request their correction was cancelling. `inFlight` keeps a copy: `clearInFlight` on the
+success path, `restoreInFlight` in the catch, before the `finally` drains. Both halves matter — without
+the clear, an answered correction is resurrected by any LATER crashed turn.
+
 **Don't switch to `toolExecutor: "sequential"`.** Two reasons. It's slower where it matters: a
 three-command fan-out measures ~13.7s concurrent vs ~21.3s sequential end-to-end, because the agent's
 fan-out tool is `run_bash` (greps, `gh api`, log queries), not local file reads. And `settleDeclaredPosts`

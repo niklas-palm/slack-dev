@@ -174,6 +174,37 @@ describe("reply_to_thread", () => {
   });
 });
 
+// `reactions.add` is Tier-3 (~50/min) and a status sweep is 4 calls per timestamp, so a busy thread can
+// exceed the limit inside ONE turn. Every caller used to read the resulting 429 as permanent — and
+// set_thread_status then told the model "this failure is not transient", about the most transient failure
+// there is, ending the thread with no colour under a good answer.
+describe("a rate-limited Slack call", () => {
+  it("retries once and succeeds", async () => {
+    const t = turn();
+    t.replied = true;
+    // The three removes come first and their errors are TOLERATED by design, so the 429 has to land on
+    // the `add` to prove anything. (A first version of this test queued one failure, it hit a remove, and
+    // the test passed with the retry deleted.)
+    responses = [{ ok: true }, { ok: true }, { ok: true }, { ok: false, error: "ratelimited" }];
+
+    const r = (await call("set_thread_status", { status: "done" }, t)) as Record<string, unknown>;
+
+    expect(r.success, "a transient 429 on the add must be retried, not reported as permanent").toBe(true);
+  });
+
+  it("gives up after one retry rather than looping", async () => {
+    const t = turn();
+    t.replied = true;
+    // Refuse every call: the retry must not recurse past one attempt per call.
+    responses = Array.from({ length: 40 }, () => ({ ok: false, error: "ratelimited" }));
+
+    await call("set_thread_status", { status: "done" }, t);
+
+    // 2 timestamps x 4 calls x at most 2 attempts. An unbounded retry would blow /terminate's 60s ceiling.
+    expect(calls.length, "one retry per call, not a loop").toBeLessThanOrEqual(16);
+  });
+});
+
 describe("set_thread_status", () => {
   it("clears the other three status reactions before adding the new one", async () => {
     const t = turn();
@@ -216,7 +247,7 @@ describe("set_thread_status", () => {
     alsoReactTo(target, "102.0");
     calls = [];
     // 4 calls per timestamp (3 removes + 1 add); fail only the third timestamp's add.
-    responses = [...Array(11).fill({ ok: true }), { ok: false, error: "ratelimited" }];
+    responses = [...Array(11).fill({ ok: true }), { ok: false, error: "message_not_found" }];
 
     expect(await setThreadStatus(target, "done")).toBe(true);
   });
@@ -224,7 +255,7 @@ describe("set_thread_status", () => {
   it("reports failure when the turn's OWN message can't be marked", async () => {
     const target = asSlackTarget({ channel_id: "C1", thread_ts: "100.0", trigger_message_ts: "101.0" })!;
     calls = [];
-    responses = [...Array(3).fill({ ok: true }), { ok: false, error: "ratelimited" }];
+    responses = [...Array(3).fill({ ok: true }), { ok: false, error: "message_not_found" }];
 
     expect(await setThreadStatus(target, "done")).toBe(false);
   });
@@ -254,31 +285,31 @@ describe("set_thread_status", () => {
   // answer with a spurious "I may not have finished everything". ask_user never read that flag anyway.
   it("a rate-limited ask_user does not disarm set_thread_status's first retry", async () => {
     const t = turn();
-    responses = [{ ok: true, ts: "5.0" }, { ok: true }, { ok: true }, { ok: true }, { ok: false, error: "ratelimited" }];
+    responses = [{ ok: true, ts: "5.0" }, { ok: true }, { ok: true }, { ok: true }, { ok: false, error: "message_not_found" }];
     await call("ask_user", { question: "Which env?" }, t);
 
     responses = [];
     await call("reply_to_thread", { text: "It's staging." }, t);
 
-    responses = [{ ok: true }, { ok: true }, { ok: true }, { ok: false, error: "ratelimited" }];
+    responses = [{ ok: true }, { ok: true }, { ok: true }, { ok: false, error: "message_not_found" }];
     const st = (await call("set_thread_status", { status: "done" }, t)) as Record<string, string>;
     expect(st.hint, "attempt #1 for THIS tool must still invite a retry").toMatch(/try set_thread_status again/);
   });
 
   // A transient blip early in a turn must not disarm the retry the CLOSING status is entitled to. The
   // set-before-reply path makes this reachable: it tells the model to set the status again, so a single
-  // `ratelimited` used to leave the counter armed and the real close got "do NOT retry" on attempt #1 —
+  // a transient refusal used to leave the counter armed and the real close got "do NOT retry" on attempt #1 —
   // ending the turn with status null and a spurious "I may not have finished everything".
   it("forgives an earlier failure once a status has landed", async () => {
     const t = turn();
     t.replied = true;
-    responses = [{ ok: true }, { ok: true }, { ok: true }, { ok: false, error: "ratelimited" }];
+    responses = [{ ok: true }, { ok: true }, { ok: true }, { ok: false, error: "message_not_found" }];
     expect(((await call("set_thread_status", { status: "done" }, t)) as Record<string, unknown>).success).toBe(false);
 
     responses = []; // everything succeeds
     expect(((await call("set_thread_status", { status: "done" }, t)) as Record<string, unknown>).success).toBe(true);
 
-    responses = [{ ok: true }, { ok: true }, { ok: true }, { ok: false, error: "ratelimited" }];
+    responses = [{ ok: true }, { ok: true }, { ok: true }, { ok: false, error: "message_not_found" }];
     const again = (await call("set_thread_status", { status: "done" }, t)) as Record<string, string>;
     expect(again.hint, "a fresh failure after a success is attempt #1, not #2").toMatch(/try set_thread_status again/);
   });
@@ -332,7 +363,7 @@ describe("set_thread_status", () => {
       { ok: true },
       { ok: true },
       { ok: true },
-      { ok: false, error: "ratelimited" },
+      { ok: false, error: "message_not_found" },
     ];
     const t = turn();
     t.replied = true;
@@ -429,7 +460,7 @@ describe("a rejected Slack reaction", () => {
       { ok: true },
       { ok: true },
       { ok: true },
-      { ok: false, error: "ratelimited" },
+      { ok: false, error: "message_not_found" },
     ];
     const t = turn();
 

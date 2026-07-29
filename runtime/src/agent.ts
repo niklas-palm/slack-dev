@@ -68,6 +68,36 @@ export function drain(sessionId: string): string[] {
   return inbox;
 }
 
+/**
+ * Messages handed to the model but not yet survived by a completed model call.
+ *
+ * Exists because delivery and crash-recovery destroyed each other. `BeforeModelCallEvent` splices the
+ * inbox EMPTY and pushes the text into `agent.messages` — so that push is the only copy — and if the next
+ * model call throws, `runTurn`'s catch truncates `agent.messages` back to `historyLength` and takes the
+ * correction with it. `drain()` then finds nothing, no follow-up turn is queued, and the person is told
+ * "mention me again to retry" — where a retry re-runs the ORIGINAL request their correction was
+ * cancelling. agent.ts's own header calls an unanswered correction the worst outcome; this closes the one
+ * path that produced it.
+ */
+const inFlight = new Map<string, string[]>();
+
+/** Put delivered-but-unanswered messages back in the inbox, so the crash path can requeue them. */
+export function restoreInFlight(sessionId: string): void {
+  const pending = inFlight.get(sessionId);
+  if (!pending?.length) return;
+  inFlight.delete(sessionId);
+  const inbox = inboxes.get(sessionId);
+  // Unshift: these arrived BEFORE anything the inbox has picked up since.
+  if (inbox) inbox.unshift(...pending);
+  else inboxes.set(sessionId, [...pending]);
+  emit("in_flight_restored", { session_id: sessionId, count: pending.length });
+}
+
+/** Delivery survived a model call, so it can no longer be lost by a truncation. */
+export function clearInFlight(sessionId: string): void {
+  inFlight.delete(sessionId);
+}
+
 export function buildAgent(sessionId: string): Agent {
   const agent = new Agent({
     name: AGENT_NAME,
@@ -109,6 +139,9 @@ export function buildAgent(sessionId: string): Agent {
     const pending = inboxes.get(sessionId);
     if (!pending?.length) return;
     const messages = pending.splice(0);
+    // Keep a copy until a model call completes: the splice above leaves the push below as the ONLY copy,
+    // and a throw in that call truncates it away. See inFlight/restoreInFlight.
+    inFlight.set(sessionId, messages);
     emit("message_delivered", {
       session_id: sessionId,
       count: messages.length,

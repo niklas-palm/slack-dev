@@ -15,7 +15,7 @@ import { GetParameterCommand, SSMClient } from "@aws-sdk/client-ssm";
 
 import { REGION } from "../lib/config.js";
 import {
-  authToken,
+  vmRequest,
   getMicrovm,
   runMicrovm,
   terminateMicrovm,
@@ -75,18 +75,13 @@ for (let i = 0; i < 30; i++) {
   await new Promise((r) => setTimeout(r, 2000));
 }
 
-const token = await authToken(vm.microvmId, AGENT_PORT);
-const res = await fetch(`https://${vm.endpoint}/invoke`, {
+const res = await vmRequest(vm, AGENT_PORT, {
   method: "POST",
-  headers: {
-    "X-aws-proxy-auth": token,
-    "X-aws-proxy-port": String(AGENT_PORT),
-    "content-type": "application/json",
-  },
+  path: "/invoke",
   body: JSON.stringify({ sessionId: "invoke", prompt, source: "local" }),
-  signal: AbortSignal.timeout(30_000),
+  timeoutMs: 30_000,
 });
-console.log(`▸ /invoke → ${res.status} ${(await res.text()).slice(0, 200)}`);
+console.log(`▸ /invoke → ${res.status} ${res.body.slice(0, 200)}`);
 
 console.log(
   `\nThe agent works detached; its answer goes to the VM's logs. Follow them with:\n\n` +

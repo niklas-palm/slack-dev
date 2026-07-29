@@ -17,11 +17,12 @@ import {
   openSync,
   readFileSync,
   readSync,
+  realpathSync,
   statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, extname, join, relative, resolve } from "node:path";
+import { basename, dirname, extname, join, relative, resolve } from "node:path";
 
 import { BedrockRuntimeClient, ConverseCommand } from "@aws-sdk/client-bedrock-runtime";
 import { tool as strandsTool } from "@strands-agents/sdk";
@@ -56,12 +57,89 @@ const IMAGE_FORMATS: Record<string, "jpeg" | "png" | "gif" | "webp"> = {
 
 // --- helpers ---------------------------------------------------------------
 
-function safePath(rel: string | null | undefined): string {
+/**
+ * Resolve a workspace-relative path, refusing anything that lands outside it.
+ *
+ * `resolve()` alone is NOT enough: it normalizes `..` but does not follow symlinks, so a path whose
+ * final target is elsewhere passed the prefix check. That is reachable from untrusted input — the agent
+ * clones repos into the workspace, and a symlink committed in one (`docs/notes.md -> /root/.aws/
+ * credentials`) turned read_file into an arbitrary-file READ and write_file into an arbitrary-file WRITE.
+ * Verified before the fix: `link.txt` and `dirlink/OUTSIDE.txt` both escaped, and a write through a
+ * symlinked directory landed outside the workspace.
+ *
+ * So re-check the REAL path. For a file that doesn't exist yet (a create), the file itself has no real
+ * path, so resolve its parent directory instead — that is what a symlinked-directory escape abuses.
+ * Exported because slack-tools.ts needs the identical guarantee; it had its own copy of the weaker check.
+ */
+export function safePath(rel: string | null | undefined): string {
   const p = resolve(WORKSPACE, rel ?? "");
-  if (p !== WORKSPACE && !p.startsWith(WORKSPACE + "/")) {
+  const under = (candidate: string, root: string): boolean =>
+    candidate === root || candidate.startsWith(root + "/");
+
+  // Lexical: catches `..`, compared against the workspace as written.
+  if (!under(p, WORKSPACE)) throw new Error(`path traversal not allowed; stay inside ${WORKSPACE}`);
+
+  // realpath throws on any component that doesn't exist yet, and creates legitimately invent whole
+  // chains ("a/b/c.txt"). So resolve the deepest ancestor that DOES exist and re-attach the rest: a
+  // symlink can only be a component that exists, so every escape is still caught.
+  let real: string;
+  try {
+    real = realpathSync.native(p);
+  } catch {
+    let existing = dirname(p);
+    const tail: string[] = [basename(p)];
+    while (!existsSync(existing) && dirname(existing) !== existing) {
+      tail.unshift(basename(existing));
+      existing = dirname(existing);
+    }
+    try {
+      real = join(realpathSync.native(existing), ...tail);
+    } catch {
+      return p; // nothing on the path exists; the operation fails on its own terms
+    }
+  }
+  // Physical: catches symlinks, compared against the workspace RESOLVED.
+  if (!under(real, workspaceRoot())) {
     throw new Error(`path traversal not allowed; stay inside ${WORKSPACE}`);
   }
-  return p;
+  return real;
+}
+
+/**
+ * WORKSPACE with symlinks resolved, for comparing against a realpath'd child.
+ *
+ * Matters because the workspace root itself is often behind a link — macOS `/tmp` is `/private/tmp`, and
+ * a bind-mounted workspace can be too. Comparing a resolved child against an UNresolved root refuses
+ * every legitimate read, which is a worse bug than the escape it was meant to close.
+ *
+ * Deliberately NOT memoized: a cache latched the unresolved path for ever when the root didn't exist at
+ * the first call, which re-introduced exactly that regression. One realpath per file op is noise next to
+ * the statSync/readFileSync already on every path.
+ */
+function workspaceRoot(): string {
+  try {
+    return realpathSync.native(WORKSPACE);
+  } catch {
+    return WORKSPACE;
+  }
+}
+
+/**
+ * One Bedrock client for view_image, with a request timeout.
+ *
+ * The raw SDK client defaults `requestTimeout` to UNDEFINED — Strands' BedrockModel injects 120s, this
+ * one had nothing. Measured against a black-hole endpoint: the turn sat at round 1 with zero messages
+ * posted and the thread frozen on 🟡, still pending at 200s, and `running.has(sessionId)` stayed true so
+ * every later mention returned "injected" and was answered by nobody. Module-level because it was being
+ * constructed per call.
+ */
+let bedrock: BedrockRuntimeClient | undefined;
+function bedrockClient(): BedrockRuntimeClient {
+  bedrock ??= new BedrockRuntimeClient({
+    region: REGION,
+    requestHandler: { requestTimeout: 60_000 },
+  });
+  return bedrock;
 }
 
 // Every run_bash command starts `cd /workspace/repo`, so the natural mental model is "paths are
@@ -253,6 +331,15 @@ function runChild(
       settled = true;
       clearTimeout(timer);
       clearTimeout(reap);
+      // Detach from the pipes, or an escaped grandchild keeps writing into BoundedOutput for its whole
+      // life — AFTER this tool returned to the model. The early-settle above fixes the HANG; without
+      // this it leaves the resource burn. Measured with one backgrounded `while true; do echo` (the
+      // mundane "forgot to redirect" case, not an attack): 6.3s of CPU in 3s of wall-clock — two cores
+      // — on an otherwise idle event loop, plus two leaked handles per call. On a 1-vCPU VM that starves
+      // the loop that has to serve the model round-trips and Slack calls, with nothing in the log
+      // naming the cause.
+      child.stdout?.destroy();
+      child.stderr?.destroy();
       const stdout = out.text();
       const stderr = err.text();
       done({
@@ -572,14 +659,14 @@ const viewImage = tool({
   callback: async ({ path, question }) => {
     try {
       const fp = safePath(path);
-      if (!existsSync(fp) || !statSync(fp).isFile()) return { error: `file not found: ${path}` };
+      if (!existsSync(fp) || !statSync(fp).isFile()) return notFound(path);
       const format = IMAGE_FORMATS[extname(fp).toLowerCase()];
       if (!format) {
         return { error: `unsupported image type: ${extname(fp)}`, hint: `supported: ${Object.keys(IMAGE_FORMATS).join(", ")}` };
       }
       if (statSync(fp).size > MAX_FILE_SIZE) return { error: "image too large", hint: "max 5MB" };
 
-      const bedrock = new BedrockRuntimeClient({ region: REGION });
+      const bedrock = bedrockClient();
       const response = await bedrock.send(
         new ConverseCommand({
           modelId: MODEL_ID,

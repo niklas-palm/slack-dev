@@ -38,8 +38,21 @@ you extend this — and if you widen either, say so loudly in your fork.
 
 ## Known limits, accepted deliberately
 
+- **Secrets are redacted from logs at one chokepoint, and the redaction is not total.** `emit()`
+  (`runtime/src/emit.ts`) scrubs known token shapes (`ghs_`, `xox…`, PEM blocks, `x-access-token:`) plus
+  the literal values of the secrets we put in the environment, because `tool_result` lines log whatever a
+  command printed — and the GitHub token lives in the clone's remote URL, so a plain `git remote -v` used
+  to persist a live credential to CloudWatch. Two limits worth knowing: a token **split across a line
+  break** still gets through (the patterns are per-line), and `emit()` is the ONLY redacted path — a bare
+  `console.log` added later is not covered.
 - **`curl` inside `run_bash` is unguarded** — no SSRF protection, size cap, or content-type check. Fine
   for a trusted workspace fetching a doc page; port a real fetcher if you need research.
+- **Isolation is per-THREAD, not per-message.** A thread's microVM is created on the first mention and
+  REUSED for every later one until it expires (8h ceiling, suspended while idle) — that reuse is what
+  gives a follow-up its conversation and its cloned repo. The consequence: if a thread is compromised by
+  prompt injection, the same VM — and everything written to `/workspace` — is still there for the next
+  mention in that thread. Firecracker isolates one thread from another, not a thread from its own past.
+  **If you suspect a thread, start a new one** rather than correcting in place.
 - **Never push to the default branch / never merge is enforced by the prompt, not by IAM.** The App's
   `contents: write` technically allows both. Add a branch-protection rule if that matters to you.
 - **Secrets live in SSM SecureStrings** and reach the runtime as parameter *paths*; no value enters a
@@ -56,8 +69,16 @@ you extend this — and if you widen either, say so loudly in your fork.
   token lasts ~1h, the App is scoped to ONE repository, and it cannot merge, push to a protected branch,
   administer the repo, or touch any other repo. Worst realistic case is an hour of unwanted branches and
   PR comments on a repo whose source is public anyway — not a breach. `ReadOnlyAccess` grants no
-  `secretsmanager:GetSecretValue`, no `ssm:GetParameter` and no `kms:Decrypt` (verified against the AWS
-  managed policy), and the stack adds an explicit Deny so a VM can't read another agent's SSM secrets.
+  `secretsmanager:GetSecretValue` and no `kms:Decrypt` (verified against the AWS managed policy), and the
+  stack adds an explicit Deny so a VM can't read another agent's SSM secrets.
+
+  That Deny is only as good as its action list. It once named `GetParameter`, `GetParameters` and
+  `GetParametersByPath` — and `ssm:GetParameterHistory`, which also returns a decrypted SecureString,
+  walked straight through it (verified against the live account: it returned a co-tenant's `xoxb-…` token
+  in plaintext). It is now `ssm:Get*`, plus a Deny on `kms:Decrypt` outside this agent's own prefix,
+  because the ViaService condition scopes the KMS Allow to SSM but not to a parameter. **If you add an
+  agent to an account that already has one, this boundary is what separates them — an enumerated action
+  list will silently reopen it the next time AWS ships a read verb.**
 
   For calibration: this is the same trade anyone makes running a coding agent locally with a `gh` token
   or an SSH key in their shell — the agent can read the credential and reach the network, and only its

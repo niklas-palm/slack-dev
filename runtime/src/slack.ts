@@ -92,7 +92,7 @@ export type SlackResponse = { ok?: boolean; error?: string; [k: string]: unknown
  */
 export async function slackCall(
   method: string,
-  args: { body?: Record<string, unknown>; params?: Record<string, string> } = {},
+  args: { body?: Record<string, unknown>; params?: Record<string, string>; noRetry?: boolean } = {},
 ): Promise<SlackResponse> {
   const token = process.env.SLACK_BOT_TOKEN;
   // No token means a local or direct test invoke: report it rather than throwing on every call.
@@ -110,6 +110,23 @@ export async function slackCall(
     });
     const parsed = ((await res.json().catch(() => ({}))) ?? {}) as SlackResponse;
     if (parsed.ok) return parsed;
+
+    // One bounded retry on a rate limit, honouring Retry-After. `reactions.add` is Tier-3 (~50/min) and a
+    // status sweep is 4 calls per timestamp, so a busy thread with corrections can exceed it inside ONE
+    // turn — and every caller here read the resulting 429 as a permanent refusal. set_thread_status then
+    // told the model "this failure is not transient, carry on" about the most transient failure there is,
+    // and the thread ended with no colour under a good answer. Capped at one retry and 10s: /terminate has
+    // a hard 60s ceiling, so an unbounded backoff would trade one broken promise for another.
+    if (parsed.error === "ratelimited" && !args.noRetry) {
+      // Optional-chain `headers`: it is always present on a real Response, but reading it unguarded threw
+      // "Cannot read properties of undefined" INSIDE the rate-limit path — turning a retryable 429 into a
+      // hard error, which is worse than not retrying. Any transport that omits it gets the 1s default.
+      const after = Math.min(Number(res.headers?.get("retry-after") ?? 1) || 1, 10);
+      emit("slack_rate_limited", { method, retry_after_s: after });
+      await new Promise((r) => setTimeout(r, after * 1000));
+      return slackCall(method, { ...args, noRetry: true });
+    }
+
     const error = typeof parsed.error === "string" && parsed.error ? parsed.error : `Slack returned HTTP ${res.status}`;
     return { ...parsed, ok: false, error };
   } catch (e) {
